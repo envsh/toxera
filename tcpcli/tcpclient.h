@@ -13,7 +13,6 @@
 #ifndef TCP_CLIENT_INNER_H
 #define TCP_CLIENT_INNER_H
 
-#include <cstdint>
 #include <stdint.h>
 
 #define TOX_KEY_SIZE 32
@@ -87,5 +86,11 @@ extern int addr_parse_ip(const char* ipstr, uint32_t* ipbin);
 
 /////
 extern void crypto_new_keypair(void* rng, void* pk, void* sk);
+
+///// cliutils.c
+extern int toxin_save_keys(void* path, void* pk, void* sk);
+extern int toxin_load_keys(void* path, void* pk, void* sk);
+// extern int toxin_save_keys(const char *path, const uint8_t *pk, const uint8_t *sk);
+// extern int toxin_load_keys(const char *path, uint8_t *pk, uint8_t *sk);
 
 #endif // TCP_CLIENT_INNER_H
