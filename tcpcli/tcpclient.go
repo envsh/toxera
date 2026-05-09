@@ -13,6 +13,7 @@ import (
    #cgo LDFLAGS: -ltoxcore
 
    #include <stdlib.h>
+   #include <string.h>
    #include <dlfcn.h>
    #include "tcpclient.h"
 */
@@ -47,6 +48,7 @@ func New(keyfile string) *ConnPool {
 	p.peerConns1 = make(map[int]*peer_connection)
 	p.peerConns2 = make(map[string]*peer_connection)
 	p.setup_callbacks()
+	C.set_tcp_onion_status(p.Conns, true)
 	return p
 }
 
@@ -62,14 +64,19 @@ type node struct {
 
 func (p *ConnPool) AddTcpRelay(ip string, port int, pk string) error {
 	pkb,_ := hex.DecodeString(pk)
-	ipport := C.Tox_IP_Port{}
-	ipport.family.value = C.uchar(C.net_family_ipv4())
+	ipport := C.IP_Port{}
+	ipport.ip.family = C.net_family_ipv4()
 	ipb := C.CString(ip)
 	defer C.free(voidptr(ipb))
-	C.addr_parse_ip(ipb, &ipport.ip)
+	rv1 := C.addr_parse_ip(ipb, &ipport.ip)
+	ipport.port = C.net_htons(C.ushort(port))
+	log.Println(rv1)
+	if !rv1 {
+		return nil
+	}
 
 	rv := C.add_tcp_relay_global(p.Conns, voidptr(&ipport), voidptr(&pkb[0]))
-	log.Println(rv, ip)
+	log.Println(rv, ip, port, unsafe.Sizeof(ipport))
 
 	n := &node{ip, port, pk}
 	p.relays = append(p.relays, n)
@@ -115,7 +122,11 @@ func (p *ConnPool) WriteTo(buf []byte, addr net.Addr) (int, error) {
 
 	rv := C.tcp_send_oob_packet_using_relay(p.Conns, voidptr(&relay_pkb[0]),
 		voidptr(&peer_pkb[0]), voidptr(&buf[0]), C.short(len(buf)))
-	log.Println(rv, addr)
+	if rv < 0 {
+		idx := C.tcp_relay_is_valid(p.Conns, voidptr(&relay_pkb[0]))
+		rc := C.tcp_connected_relays_count(p.Conns)
+		log.Println(rv, idx, rc, addr)
+	}
 	return 0, err
 }
 
@@ -154,6 +165,7 @@ func new_pool(keyfile string) *ConnPool {
 	logger := C.logger_new(mem)
 	np := C.netprof_new(logger, mem)
 	pxy := C.malloc(256)
+	C.memset(pxy, 0, 256)
 	defer C.free(pxy)
 
 	pk, sk := keyfile_neworload(keyfile, rng)
@@ -216,6 +228,9 @@ func dlsym0(name string) voidptr {
 	defer C.free(voidptr(namec))
 
 	f1 := C.dlsym(C.RTLD_DEFAULT, namec)
+	if f1 == nil {
+		log.Println("some error", name)
+	}
 	return f1
 }
 

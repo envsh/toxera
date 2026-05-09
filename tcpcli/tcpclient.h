@@ -41,7 +41,9 @@ extern void kill_tcp_connections(void* tcp_c);
 extern int add_tcp_relay_global(void* tcp_c, void* ip_port, void* relay_pk);
 extern bool tcp_relay_is_valid(void* tcp_c, void* relay_pk);
 extern int tcp_connected_relays_count(void* tcp_c);
+extern int find_tcp_connection_relay(void* tcp_c, void* relay_pk);
 extern int tcp_connections_count(void* tcp_c);
+extern int set_tcp_onion_status(void* tcp_c, bool enabled);
 
 // return conn_num or -1
 // id callback value
@@ -73,19 +75,42 @@ extern void set_packet_tcp_connection_callback(void* tcp_c,
 extern void logger_callback_log(void* logger, void* logcb, void* a, void* b);
 
 /////
-typedef struct Tox_Family {
+typedef struct Family {
     uint8_t value;
-} Tox_Family;
-typedef struct Tox_IP_Port {
-    Tox_Family family;
-    uint32_t ip;
-    uint32_t ip6[3];
-    uint16_t port;
-} Tox_IP_Port;
+} Family;
 
-extern uint16_t net_family_ipv4();
+typedef union IP4 {
+    uint32_t uint32;
+    uint16_t uint16[2];
+    uint8_t uint8[4];
+} IP4;
+
+typedef union IP6 {
+    uint8_t uint8[16];
+    uint16_t uint16[8];
+    uint32_t uint32[4];
+    uint64_t uint64[2];
+} IP6;
+
+typedef union IP_Union {
+    IP4 v4;
+    IP6 v6;
+} IP_Union;
+
+typedef struct IP {
+    Family family;
+    IP_Union ip;
+} IP;
+
+typedef struct IP_Port {
+    IP ip;
+    uint16_t port;
+} IP_Port;
+
+extern Family net_family_ipv4();
 extern uint16_t net_htons(uint16_t);
-extern int addr_parse_ip(const char* ipstr, uint32_t* ipbin);
+// 1 ok, 0 fail
+extern bool addr_parse_ip(const char* ipstr, IP* ipbin);
 
 /////
 extern void crypto_new_keypair(void* rng, void* pk, void* sk);
