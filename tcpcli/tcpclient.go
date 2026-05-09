@@ -18,6 +18,10 @@ import (
 */
 import "C"
 
+func init() {
+	log.SetFlags(log.Flags()|log.Lshortfile)
+}
+
 const KEY_SIZE = C.TOX_KEY_SIZE
 
 type voidptr = unsafe.Pointer
@@ -46,6 +50,10 @@ func New(keyfile string) *ConnPool {
 	return p
 }
 
+func (p *ConnPool) Iterate() {
+	C.do_tcp_connections(p.Logger, p.Conns, nil)
+}
+
 type node struct {
 	ip string
 	port int
@@ -53,8 +61,19 @@ type node struct {
 }
 
 func (p *ConnPool) AddTcpRelay(ip string, port int, pk string) error {
+	pkb,_ := hex.DecodeString(pk)
 	ipport := C.Tox_IP_Port{}
-	C.add_tcp_relay_global(p.Conns, voidptr(&ipport),nil)
+	ipport.family.value = C.uchar(C.net_family_ipv4())
+	ipb := C.CString(ip)
+	defer C.free(voidptr(ipb))
+	C.addr_parse_ip(ipb, &ipport.ip)
+
+	rv := C.add_tcp_relay_global(p.Conns, voidptr(&ipport), voidptr(&pkb[0]))
+	log.Println(rv, ip)
+
+	n := &node{ip, port, pk}
+	p.relays = append(p.relays, n)
+
 	return nil
 }
 
@@ -89,7 +108,15 @@ func (p *ConnPool) send() error {
 
 var _ net.PacketConn = (*ConnPool)(nil)
 func (p *ConnPool) WriteTo(buf []byte, addr net.Addr) (int, error) {
-	return 0, nil
+	log.Println(addr)
+	pk := p.relays[0].pk
+	relay_pkb, err := hex.DecodeString(pk)
+	peer_pkb, err := hex.DecodeString(addr.String())
+
+	rv := C.tcp_send_oob_packet_using_relay(p.Conns, voidptr(&relay_pkb[0]),
+		voidptr(&peer_pkb[0]), voidptr(&buf[0]), C.short(len(buf)))
+	log.Println(rv, addr)
+	return 0, err
 }
 
 func (p *ConnPool) ReadFrom(buf []byte) (int, net.Addr, error){
@@ -174,6 +201,8 @@ func (p *ConnPool) setup_callbacks() {
 	C.set_oob_packet_tcp_connection_callback(p.Conns, f1, p.Conns)
 	f2 := dlsym0("toxin_on_data_packet_bygo")
 	C.set_oob_packet_tcp_connection_callback(p.Conns, f2, p.Conns)
+	f3 := dlsym0("toxin_on_log_line")
+	C.logger_callback_log(p.Logger, f3, nil, nil)
 }
 
 //export toxin_on_oob_packet_bygo
@@ -193,4 +222,9 @@ func dlsym0(name string) voidptr {
 //export toxin_on_data_packet_bygo
 func toxin_on_data_packet_bygo(object voidptr, crypt_connection_id int, packet voidptr, length uint16, userdata voidptr) {
 	log.Printf("%v %v %v\n", crypt_connection_id, packet, length)
+}
+
+//export toxin_on_log_line
+func toxin_on_log_line(ctx voidptr, level int, file voidptr, line uint32, funcname voidptr, msg voidptr, userdata voidptr) {
+	log.Println(level, line, msg)
 }

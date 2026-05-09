@@ -69,6 +69,9 @@ extern void set_packet_tcp_connection_callback(void* tcp_c,
 
 // todo forward/onion packet callback
 
+
+extern void logger_callback_log(void* logger, void* logcb, void* a, void* b);
+
 /////
 typedef struct Tox_Family {
     uint8_t value;
