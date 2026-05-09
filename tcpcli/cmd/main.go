@@ -19,14 +19,24 @@ func main() {
 
 	cli := tcpcli.New(keyfile)
 	defer cli.Close()
-	cli.AddTcpRelay("43.198.227.166", 3389, "AD13AB0D434BCE6C83FE2649237183964AE3341D0AFB3BE1694B18505E4E135E")
+	// cli.AddTcpRelay("43.198.227.166", 3389, "AD13AB0D434BCE6C83FE2649237183964AE3341D0AFB3BE1694B18505E4E135E")
 	for _, n := range bootstrapNodes {
-		if false {
+		if true {
 			cli.AddTcpRelay(n.IPv4, int(n.Port), n.PublicKey)
 		}
 	}
 
 	log.Printf("pk=%v\n", cli.Selfpk)
+	log.Println("connected", cli.WaitConnected())
+
+	go func() {
+		for {
+			buf := make([]byte, 2048)
+			rn, addr, err := cli.ReadFrom(buf)
+			log.Println("<<", rn, err, addr.(peer_address).Sub7(), string(buf[:rn]))
+		}
+	}()
+
 	if peerpk != "" {
 		log.Println("yes peerpk, sender mode")
 		btime := time.Now()
@@ -40,7 +50,7 @@ func main() {
 
 			scc := fmt.Sprintf("from %v %v", keyfile, i)
 			bcc := []byte(scc)
-			wn, err := cli.WriteTo(bcc, &peer_address{peerpk})
+			wn, err := cli.WriteTo(bcc, peer_address(peerpk))
 			log.Println(">>", scc, wn, err)
 		}
 	}else{
@@ -52,16 +62,7 @@ func main() {
 	}
 }
 
-type peer_address struct {
-	pk string
-}
-
-func (a *peer_address) Network() string {
-	return ""
-}
-func (a *peer_address) String() string {
-	return a.pk
-}
+type peer_address = tcpcli.PeerAddr
 
 
 // BootstrapNode represents a Tox bootstrap node
@@ -76,40 +77,12 @@ type BootstrapNode struct {
 // Bootstrap nodes from C version (bootstrap.c)
 var bootstrapNodes = []BootstrapNode{
 	{
-		IPv4:       "104.225.141.59",
-		IPv6:       "-",
-		Port:       33445,
-		PublicKey:  "933BA20B2E258B4C0D475B6DECE90C7E827FE83EFA9655414E7841251B19A72C",
-		Maintainer: "velusip (C version)",
-	},
-	{
 		IPv4:       "43.198.227.166",
 		IPv6:       "-",
 		Port:       3389,
 		PublicKey:  "AD13AB0D434BCE6C83FE2649237183964AE3341D0AFB3BE1694B18505E4E135E",
 		Maintainer: "AnthonyBilinski (C version)",
 	},
-	{
-		IPv4:       "3.0.24.15",
-		IPv6:       "-",
-		Port:       33445,
-		PublicKey:  "E20ABCF38CDBFFD7D04B29C956B33F7B27A3BB7AF0618101617B036E4AEA402D",
-		Maintainer: "2mf (C version)",
-	},
-	{
-      IPv4: "144.217.167.73",
-      IPv6: "-",
-      Port: 33445,
-      PublicKey: "7E5668E0EE09E19F320AD47902419331FFEE147BB3606769CFBE921A2A2FD34C",
-      Maintainer: "velusip",
-    },
-    {
-      IPv4: "tox.abilinski.com",
-      IPv6: "-",
-      Port: 33445,
-      PublicKey: "10C00EB250C3233E343E2AEBA07115A5C28920E9C8D29492F6D00B29049EDC7E",
-      Maintainer: "AnthonyBilinski",
-    },
     {
       IPv4: "86.107.187.54",
       IPv6: "-",
