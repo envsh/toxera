@@ -4,9 +4,11 @@ import (
 	"unsafe"
 	"encoding/hex"
 	"log"
+	"fmt"
 	"strings"
 	"net"
 	"time"
+	"runtime"
 )
 
 /*
@@ -20,7 +22,9 @@ import (
 import "C"
 
 func init() {
-	log.SetFlags(log.Flags()|log.Lshortfile)
+	f := log.Flags()|log.Lshortfile
+	f = f ^ log.Ldate
+	log.SetFlags(f)
 }
 
 const KEY_SIZE = C.TOX_KEY_SIZE
@@ -37,6 +41,8 @@ type ConnPool struct {
 	Proxy  voidptr
 
 	Conns voidptr
+	Selfpk string
+	Selfsk string
 
 	relays  []*node
 	peerConns1 map[int]*peer_connection
@@ -70,13 +76,17 @@ func (p *ConnPool) AddTcpRelay(ip string, port int, pk string) error {
 	defer C.free(voidptr(ipb))
 	rv1 := C.addr_parse_ip(ipb, &ipport.ip)
 	ipport.port = C.net_htons(C.ushort(port))
-	log.Println(rv1)
 	if !rv1 {
+		log.Println("parse ip error", rv1, ip)
 		return nil
 	}
 
 	rv := C.add_tcp_relay_global(p.Conns, voidptr(&ipport), voidptr(&pkb[0]))
-	log.Println(rv, ip, port, unsafe.Sizeof(ipport))
+	if rv != 0{
+		log.Println(rv, ip, port, unsafe.Sizeof(ipport))
+		err := fmt.Errorf("err %v, %v:%v %v", ip, port, len(pk))
+		return err
+	}
 
 	n := &node{ip, port, pk}
 	p.relays = append(p.relays, n)
@@ -115,7 +125,7 @@ func (p *ConnPool) send() error {
 
 var _ net.PacketConn = (*ConnPool)(nil)
 func (p *ConnPool) WriteTo(buf []byte, addr net.Addr) (int, error) {
-	log.Println(addr)
+	// log.Println(addr)
 	pk := p.relays[0].pk
 	relay_pkb, err := hex.DecodeString(pk)
 	peer_pkb, err := hex.DecodeString(addr.String())
@@ -123,9 +133,10 @@ func (p *ConnPool) WriteTo(buf []byte, addr net.Addr) (int, error) {
 	rv := C.tcp_send_oob_packet_using_relay(p.Conns, voidptr(&relay_pkb[0]),
 		voidptr(&peer_pkb[0]), voidptr(&buf[0]), C.short(len(buf)))
 	if rv < 0 {
-		idx := C.tcp_relay_is_valid(p.Conns, voidptr(&relay_pkb[0]))
+		valid := C.tcp_relay_is_valid(p.Conns, voidptr(&relay_pkb[0]))
 		rc := C.tcp_connected_relays_count(p.Conns)
-		log.Println(rv, idx, rc, addr)
+		err = fmt.Errorf("err %v, relay valid/count %v/%v", rv, valid, rc)
+		log.Println(err)
 	}
 	return 0, err
 }
@@ -171,7 +182,7 @@ func new_pool(keyfile string) *ConnPool {
 	pk, sk := keyfile_neworload(keyfile, rng)
 	skb, err := hex.DecodeString(sk)
 	if err != nil { log.Fatalln(err) }
-	log.Printf("pk=%v\n", pk)
+	// log.Printf("pk=%v\n", pk)
 
 	o := C.new_tcp_connections(logger, mem, rng, ns,
 		mono_time, voidptr(&skb[0]), pxy, np)
@@ -181,6 +192,8 @@ func new_pool(keyfile string) *ConnPool {
 	p.Mem = mem
 	p.Rng = rng
 	p.Logger = logger
+	p.Selfpk = pk
+	p.Selfsk = sk
 
 	return p
 }
@@ -197,9 +210,9 @@ func keyfile_neworload(keyfile string, rng voidptr) (string, string) {
     if C.toxin_load_keys(keyfilec, pkc, skc) == -1 {
         C.crypto_new_keypair(rng, pkc, skc)
         C.toxin_save_keys(keyfilec, pkc, skc)
-        // println("已生成新密钥，保存到 %s")
+        log.Println("已生成新密钥，保存到", keyfile)
     } else {
-        // println("已加载密钥文件 %s");
+        log.Println("已加载密钥文件", keyfile);
     }
 
 	r0 := hex.EncodeToString(pk[:])
@@ -208,20 +221,39 @@ func keyfile_neworload(keyfile string, rng voidptr) (string, string) {
 	return strings.ToUpper(r0), strings.ToUpper(r1)
 }
 
+var cgopin = &runtime.Pinner{}
+var gp *ConnPool
+
 func (p *ConnPool) setup_callbacks() {
+	cbobj := voidptr(p)
+	cgopin.Pin(cbobj) // useless?
+	gp = p
+
 	f1 := dlsym0("toxin_on_oob_packet_bygo")
 	C.set_oob_packet_tcp_connection_callback(p.Conns, f1, p.Conns)
 	f2 := dlsym0("toxin_on_data_packet_bygo")
-	C.set_oob_packet_tcp_connection_callback(p.Conns, f2, p.Conns)
+	C.set_packet_tcp_connection_callback(p.Conns, f2, p.Conns)
 	f3 := dlsym0("toxin_on_log_line")
 	C.logger_callback_log(p.Logger, f3, nil, nil)
 }
 
-//export toxin_on_oob_packet_bygo
-func toxin_on_oob_packet_bygo(obj voidptr, pubkey voidptr, tcp_connections_number int, packet voidptr, length uint16, userdata voidptr) {
-	log.Printf("%v %v %v\n", tcp_connections_number, packet, length)
+func key_bin2hex(key voidptr) string {
+	pkb := C.GoStringN((*C.char)(key), 32)
+	val := hex.EncodeToString([]byte(pkb))
+	return strings.ToUpper(val)
 }
 
+//export toxin_on_oob_packet_bygo
+func toxin_on_oob_packet_bygo(obj voidptr, peerpk voidptr, tcp_connections_number int, packet *C.char, length uint16, userdata voidptr) {
+	log.Println("<<", tcp_connections_number, packet, length)
+	pkt := C.GoStringN(packet, C.int(length))
+	pk := key_bin2hex(peerpk)
+
+	gp.on_oob_packet(obj, pk, tcp_connections_number, pkt)
+}
+func (p* ConnPool) on_oob_packet(obj voidptr, peerpk string, conn_num int, pkt string) {
+	log.Println("<<", pkt, peerpk)
+}
 
 func dlsym0(name string) voidptr {
 	namec := C.CString(name)
@@ -236,7 +268,10 @@ func dlsym0(name string) voidptr {
 
 //export toxin_on_data_packet_bygo
 func toxin_on_data_packet_bygo(object voidptr, crypt_connection_id int, packet voidptr, length uint16, userdata voidptr) {
-	log.Printf("%v %v %v\n", crypt_connection_id, packet, length)
+	log.Println("<<", crypt_connection_id, packet, length)
+	gp.on_data_packet()
+}
+func (p *ConnPool) on_data_packet() {
 }
 
 //export toxin_on_log_line

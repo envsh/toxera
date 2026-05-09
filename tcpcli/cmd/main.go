@@ -21,11 +21,12 @@ func main() {
 	defer cli.Close()
 	cli.AddTcpRelay("43.198.227.166", 3389, "AD13AB0D434BCE6C83FE2649237183964AE3341D0AFB3BE1694B18505E4E135E")
 	for _, n := range bootstrapNodes {
-		if true {
+		if false {
 			cli.AddTcpRelay(n.IPv4, int(n.Port), n.PublicKey)
 		}
 	}
 
+	log.Printf("pk=%v\n", cli.Selfpk)
 	if peerpk != "" {
 		log.Println("yes peerpk, sender mode")
 		btime := time.Now()
@@ -39,8 +40,8 @@ func main() {
 
 			scc := fmt.Sprintf("from %v %v", keyfile, i)
 			bcc := []byte(scc)
-			cli.WriteTo(bcc, &peer_address{peerpk})
-			log.Printf(">> %v %v\n", scc, 1)
+			wn, err := cli.WriteTo(bcc, &peer_address{peerpk})
+			log.Println(">>", scc, wn, err)
 		}
 	}else{
 		log.Println("no peerpk, wait mode")
