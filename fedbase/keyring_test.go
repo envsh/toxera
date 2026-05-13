@@ -27,7 +27,7 @@ func TestKeyRingGenerateAndLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.Remove(path)
-	kr2, err := LoadKeyRing(path)
+	kr2, err := LoadKeyRing(path, false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -46,10 +46,21 @@ func GenerateKeyRing() (*KeyRing, error) {
 	return kr, nil
 }
 
-func LoadKeyRing(path string) (*KeyRing, error) {
+func LoadKeyRing(path string, create bool) (*KeyRing, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		if !create || !os.IsNotExist(err) {
+			return nil, err
+		}
+		kr, err := GenerateKeyRing()
+		if err != nil {
+			return nil, fmt.Errorf("generate keyring: %w", err)
+		}
+		if err := kr.Save(path); err != nil {
+			return nil, fmt.Errorf("save keyring to %s: %w", path, err)
+		}
+		fmt.Println("Generated new keyring:", path)
+		return kr, nil
 	}
 	defer f.Close()
 
@@ -692,7 +703,7 @@ func (kr *KeyRing) AvalancheBLSKey() ([]byte, []byte) {
 // ====== Group E: libp2p ======
 
 const (
-	Libp2pEd25519   = iota
+	Libp2pEd25519 = iota
 	Libp2pSecp256k1
 	Libp2pRSA
 )
@@ -708,7 +719,7 @@ func protoVarint(v uint64) []byte {
 
 func protoLenDelim(field uint64, data []byte) []byte {
 	var buf []byte
-	buf = append(buf, protoVarint(field*8+2)...)  // wire type 2 (length-delimited)
+	buf = append(buf, protoVarint(field*8+2)...) // wire type 2 (length-delimited)
 	buf = append(buf, protoVarint(uint64(len(data)))...)
 	buf = append(buf, data...)
 	return buf
@@ -716,7 +727,7 @@ func protoLenDelim(field uint64, data []byte) []byte {
 
 func protoVarintField(field uint64, value uint64) []byte {
 	var buf []byte
-	buf = append(buf, protoVarint(field*8+0)...)  // wire type 0 (varint)
+	buf = append(buf, protoVarint(field*8+0)...) // wire type 0 (varint)
 	buf = append(buf, protoVarint(value)...)
 	return buf
 }
