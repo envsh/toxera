@@ -310,17 +310,17 @@ func (kr *KeyRing) ed25519Pub() []byte {
 	return []byte(kr.BTDHTKey().Public().(ed25519.PublicKey))
 }
 
-func (kr *KeyRing) secp256k1Priv() *secp256k1.PrivateKey {
+func (kr *KeyRing) Secp256k1Priv() *secp256k1.PrivateKey {
 	priv, _ := kr.NostrKey()
 	return priv
 }
 
-func (kr *KeyRing) secp256k1Pub() []byte {
+func (kr *KeyRing) Secp256k1Pub() []byte {
 	_, pub := kr.NostrKey()
 	return pub.SerializeCompressed()
 }
 
-func (kr *KeyRing) secp256k1PubUncompressed() []byte {
+func (kr *KeyRing) Secp256k1PubUncompressed() []byte {
 	_, pub := kr.NostrKey()
 	return pub.SerializeUncompressed()
 }
@@ -436,7 +436,7 @@ func ripemd160Hash(data []byte) []byte {
 	return h.Sum(nil)
 }
 
-func sha256d(data []byte) []byte {
+func Sha256d(data []byte) []byte {
 	h := sha256.Sum256(data)
 	h2 := sha256.Sum256(h[:])
 	return h2[:]
@@ -444,7 +444,7 @@ func sha256d(data []byte) []byte {
 
 func base58Check(version byte, data []byte) string {
 	payload := append([]byte{version}, data...)
-	checksum := sha256d(payload)[:4]
+	checksum := Sha256d(payload)[:4]
 	return base58Encode(append(payload, checksum...))
 }
 
@@ -587,30 +587,30 @@ func (kr *KeyRing) TailscaleTLK() []byte {
 // ====== Group B: secp256k1 Protocols ======
 
 func (kr *KeyRing) BitcoinV2Key() []byte {
-	return kr.secp256k1Priv().Serialize()
+	return kr.Secp256k1Priv().Serialize()
 }
 
 func (kr *KeyRing) EthNodeKeyHex() string {
-	return hex.EncodeToString(kr.secp256k1Priv().Serialize())
+	return hex.EncodeToString(kr.Secp256k1Priv().Serialize())
 }
 
 func (kr *KeyRing) EthNodeID() string {
-	raw := kr.secp256k1PubUncompressed()
+	raw := kr.Secp256k1PubUncompressed()
 	// skip 0x04 prefix, take x||y (64 bytes)
 	return hex.EncodeToString(raw[1:])
 }
 
 func (kr *KeyRing) EthENRNodeID() []byte {
-	raw := kr.secp256k1PubUncompressed()
+	raw := kr.Secp256k1PubUncompressed()
 	return keccak256(raw[1:])
 }
 
 func (kr *KeyRing) LightningNodeID() string {
-	return hex.EncodeToString(kr.secp256k1Pub())
+	return hex.EncodeToString(kr.Secp256k1Pub())
 }
 
 func (kr *KeyRing) BitmessageAddress() string {
-	signPriv := kr.secp256k1Priv()
+	signPriv := kr.Secp256k1Priv()
 	_, signPub := signPriv.PubKey().SerializeUncompressed(), signPriv.PubKey()
 	// encryption key derived from SHA256(seed[32:48])
 	encSeed := sha256.Sum256(kr.seed[KeyBytes:])
@@ -624,11 +624,11 @@ func (kr *KeyRing) BitmessageAddress() string {
 }
 
 func (kr *KeyRing) ZeroNetAddress() string {
-	return bitcoinAddress(kr.secp256k1Pub())
+	return bitcoinAddress(kr.Secp256k1Pub())
 }
 
 func (kr *KeyRing) AvalancheNodeID() string {
-	h := sha256.Sum256(kr.secp256k1Pub())
+	h := sha256.Sum256(kr.Secp256k1Pub())
 	return "NodeID-" + base58Encode(h[:20])
 }
 
@@ -647,7 +647,7 @@ func (kr *KeyRing) ArweaveAddress() string {
 func (kr *KeyRing) StorjIdentityKey() string {
 	// NOTE: Storj requires proof-of-work (>=36 zero bits).
 	// This returns the raw identity key; caller must perform PoW.
-	h := sha256.Sum256(kr.secp256k1Pub())
+	h := sha256.Sum256(kr.Secp256k1Pub())
 	return hex.EncodeToString(h[:])
 }
 
@@ -748,7 +748,7 @@ func (kr *KeyRing) Libp2pPeerID(kind int) string {
 		pubKeyData = kr.ed25519Pub()
 		keyType = 1
 	case Libp2pSecp256k1:
-		pubKeyData = kr.secp256k1Pub()
+		pubKeyData = kr.Secp256k1Pub()
 		keyType = 2
 	case Libp2pRSA:
 		rsaKey, err := kr.OpenDHTKey()
