@@ -55,6 +55,39 @@ func init() {
 	purego.RegisterLibFunc(&toxErrGroupPeerQueryToString, libHandle, "tox_err_group_peer_query_to_string")
 	purego.RegisterLibFunc(&toxSetAVObject, libHandle, "tox_set_av_object")
 	purego.RegisterLibFunc(&toxGetAVObject, libHandle, "tox_get_av_object")
+
+	purego.RegisterLibFunc(&tox_os_memory, libHandle, "os_memory")
+	purego.RegisterLibFunc(&tox_os_random, libHandle, "os_random")
+	purego.RegisterLibFunc(&tox_os_network, libHandle, "os_network")
+	purego.RegisterLibFunc(&tox_logger_new, libHandle, "logger_new")
+	purego.RegisterLibFunc(&tox_mono_time_new, libHandle, "mono_time_new")
+	purego.RegisterLibFunc(&tox_netprof_new, libHandle, "netprof_new")
+
+	purego.RegisterLibFunc(&tox_new_tcp_connections, libHandle, "new_tcp_connections")
+	purego.RegisterLibFunc(&tox_do_tcp_connections, libHandle, "do_tcp_connections")
+	purego.RegisterLibFunc(&tox_kill_tcp_connections, libHandle, "kill_tcp_connections")
+
+	purego.RegisterLibFunc(&tox_add_tcp_relay_global, libHandle, "add_tcp_relay_global")
+	purego.RegisterLibFunc(&tox_tcp_relay_is_valid, libHandle, "tcp_relay_is_valid")
+	purego.RegisterLibFunc(&tox_tcp_connected_relays_count, libHandle, "tcp_connected_relays_count")
+	purego.RegisterLibFunc(&tox_tcp_connections_count, libHandle, "tcp_connections_count")
+	purego.RegisterLibFunc(&tox_set_tcp_onion_status, libHandle, "set_tcp_onion_status")
+
+	purego.RegisterLibFunc(&tox_new_tcp_connection_to, libHandle, "new_tcp_connection_to")
+	purego.RegisterLibFunc(&tox_kill_tcp_connection_to, libHandle, "kill_tcp_connection_to")
+	purego.RegisterLibFunc(&tox_send_packet_tcp_connection, libHandle, "send_packet_tcp_connection")
+	purego.RegisterLibFunc(&tox_tcp_send_onion_request, libHandle, "tcp_send_onion_request")
+	purego.RegisterLibFunc(&tox_tcp_send_oob_packet_using_relay, libHandle, "tcp_send_oob_packet_using_relay")
+
+	purego.RegisterLibFunc(&tox_set_oob_packet_tcp_connection_callback, libHandle, "set_oob_packet_tcp_connection_callback")
+	purego.RegisterLibFunc(&tox_set_packet_tcp_connection_callback, libHandle, "set_packet_tcp_connection_callback")
+	purego.RegisterLibFunc(&tox_logger_callback_log, libHandle, "logger_callback_log")
+
+	purego.RegisterLibFunc(&tox_net_family_ipv4, libHandle, "net_family_ipv4")
+	purego.RegisterLibFunc(&tox_net_htons, libHandle, "net_htons")
+	purego.RegisterLibFunc(&tox_addr_parse_ip, libHandle, "addr_parse_ip")
+
+	purego.RegisterLibFunc(&tox_crypto_new_keypair, libHandle, "crypto_new_keypair")
 }
 
 func goString(ptr unsafe.Pointer) string {
