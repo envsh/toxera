@@ -7,11 +7,11 @@ import (
 )
 
 type Tox struct {
-	ctox uintptr
+	ctox unsafe.Pointer
 }
 
 func NewTox(ctox unsafe.Pointer) *Tox {
-	return &Tox{ctox: uintptr(ctox)}
+	return &Tox{ctox: ctox}
 }
 
 const GroupPeerIPStringMaxLength = 96
@@ -38,6 +38,8 @@ var (
 	toxErrGroupPeerQueryToString func(code int32) unsafe.Pointer
 	toxSetAVObject               func(tox uintptr, object uintptr)
 	toxGetAVObject               func(tox uintptr) uintptr
+	toxLock                      func(tox uintptr)
+	toxUnlock                    func(tox uintptr)
 )
 
 func init() {
@@ -55,6 +57,8 @@ func init() {
 	purego.RegisterLibFunc(&toxErrGroupPeerQueryToString, libHandle, "tox_err_group_peer_query_to_string")
 	purego.RegisterLibFunc(&toxSetAVObject, libHandle, "tox_set_av_object")
 	purego.RegisterLibFunc(&toxGetAVObject, libHandle, "tox_get_av_object")
+	purego.RegisterLibFunc(&toxLock, libHandle, "tox_lock")
+	purego.RegisterLibFunc(&toxUnlock, libHandle, "tox_unlock")
 
 	purego.RegisterLibFunc(&tox_os_memory, libHandle, "os_memory")
 	purego.RegisterLibFunc(&tox_os_random, libHandle, "os_random")
@@ -88,6 +92,16 @@ func init() {
 	purego.RegisterLibFunc(&tox_addr_parse_ip, libHandle, "addr_parse_ip")
 
 	purego.RegisterLibFunc(&tox_crypto_new_keypair, libHandle, "crypto_new_keypair")
+
+	purego.RegisterLibFunc(&tox_m_get_friend_connectionstatus, libHandle, "m_get_friend_connectionstatus")
+	purego.RegisterLibFunc(&tox_friend_connection_crypt_connection_id, libHandle, "friend_connection_crypt_connection_id")
+	purego.RegisterLibFunc(&tox_crypto_connection_status, libHandle, "crypto_connection_status")
+
+	purego.RegisterLibFunc(&tox_getfriendcon_id, libHandle, "getfriendcon_id")
+	purego.RegisterLibFunc(&tox_get_conn, libHandle, "get_conn")
+	purego.RegisterLibFunc(&tox_friend_conn_get_dht_ip_port, libHandle, "friend_conn_get_dht_ip_port")
+	purego.RegisterLibFunc(&tox_copy_connected_tcp_relays_index, libHandle, "copy_connected_tcp_relays_index")
+	purego.RegisterLibFunc(&tox_net_family_ipv6, libHandle, "net_family_ipv6")
 }
 
 func goString(ptr unsafe.Pointer) string {
@@ -115,19 +129,27 @@ func clen(b []byte) int {
 }
 
 func (tox *Tox) SetAVObject(object unsafe.Pointer) {
-	toxSetAVObject(tox.ctox, uintptr(object))
+	toxSetAVObject(uintptr(tox.ctox), uintptr(object))
 }
 
 func (tox *Tox) GetAVObject() unsafe.Pointer {
-	p := toxGetAVObject(tox.ctox)
+	p := toxGetAVObject(uintptr(tox.ctox))
 	return *(*unsafe.Pointer)(unsafe.Pointer(&p))
+}
+
+func (tox *Tox) Lock() {
+	toxLock(uintptr(tox.ctox))
+}
+
+func (tox *Tox) Unlock() {
+	toxUnlock(uintptr(tox.ctox))
 }
 
 func (tox *Tox) GroupPeerGetIPAddress(groupNumber, peerID uint32) (string, error) {
 	buf := make([]byte, GroupPeerIPStringMaxLength)
 	var errCode int32
 	p := unsafe.Pointer(&buf[0])
-	ok := toxGroupPeerGetIPAddress(tox.ctox, groupNumber, peerID, uintptr(p), &errCode)
+	ok := toxGroupPeerGetIPAddress(uintptr(tox.ctox), groupNumber, peerID, uintptr(p), &errCode)
 	if !ok {
 		return "", ErrGroupPeerQuery(errCode)
 	}

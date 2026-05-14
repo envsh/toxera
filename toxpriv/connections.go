@@ -1,6 +1,10 @@
 package toxpriv
 
-import "unsafe"
+import (
+	"net"
+	"strconv"
+	"unsafe"
+)
 
 // C-compatible struct layouts (linux/amd64)
 
@@ -220,3 +224,34 @@ var errParseIP = &parseIPError{}
 type parseIPError struct{}
 
 func (*parseIPError) Error() string { return "toxpriv: parse ip failed" }
+
+// NodeFormat matches C Node_format struct.
+type NodeFormat struct {
+	PublicKey [32]byte
+	IpPort    IP_Port
+}
+
+var (
+	tox_net_family_ipv6                func() Family
+	tox_copy_connected_tcp_relays_index func(nc unsafe.Pointer, tcpRelays unsafe.Pointer, num uint16, idx uint32) uint32
+)
+
+func NetFamilyIPv6() Family {
+	return tox_net_family_ipv6()
+}
+
+func CopyConnectedTCPRelaysIndex(nc NetCrypto, tcpRelays *NodeFormat, num uint16, idx uint32) uint32 {
+	return tox_copy_connected_tcp_relays_index(unsafe.Pointer(nc), unsafe.Pointer(tcpRelays), num, idx)
+}
+
+func formatIPPort(ipp IP_Port) string {
+	port := NetHtons(ipp.Port)
+	switch ipp.Ip.Family {
+	case NetFamilyIPv4():
+		return net.JoinHostPort(net.IP(ipp.Ip.Ip[:4]).String(), strconv.Itoa(int(port)))
+	case NetFamilyIPv6():
+		return net.JoinHostPort(net.IP(ipp.Ip.Ip[:]).String(), strconv.Itoa(int(port)))
+	default:
+		return ""
+	}
+}
