@@ -44,64 +44,80 @@ var (
 
 func init() {
 	var err error
-	for _, name := range []string{"libtoxcore.so", "libtoxcore.so.0"} {
-		libHandle, err = purego.Dlopen(name, purego.RTLD_LAZY|purego.RTLD_GLOBAL)
-		if err == nil {
-			break
+	libHandle = 0
+
+	// 先尝试 RTLD_DEFAULT（静态链接场景，tox_iterate 是常用函数）
+	_, err = purego.Dlsym(0, "tox_iterate")
+	if err != nil {
+		// 回退到动态加载
+		for _, name := range []string{"libtoxcore.so", "libtoxcore.so.0"} {
+			libHandle, err = purego.Dlopen(name, purego.RTLD_LAZY|purego.RTLD_GLOBAL)
+			if err == nil {
+				break
+			}
+		}
+		if err != nil {
+			panic("toxpriv: cannot open libtoxcore: " + err.Error())
 		}
 	}
+
+	mustRegister(&toxGroupPeerGetIPAddress, libHandle, "tox_group_peer_get_ip_address")
+	mustRegister(&toxErrGroupPeerQueryToString, libHandle, "tox_err_group_peer_query_to_string")
+	mustRegister(&toxSetAVObject, libHandle, "tox_set_av_object")
+	mustRegister(&toxGetAVObject, libHandle, "tox_get_av_object")
+	mustRegister(&toxLock, libHandle, "tox_lock")
+	mustRegister(&toxUnlock, libHandle, "tox_unlock")
+
+	mustRegister(&tox_os_memory, libHandle, "os_memory")
+	mustRegister(&tox_os_random, libHandle, "os_random")
+	mustRegister(&tox_os_network, libHandle, "os_network")
+	mustRegister(&tox_logger_new, libHandle, "logger_new")
+	mustRegister(&tox_mono_time_new, libHandle, "mono_time_new")
+	mustRegister(&tox_netprof_new, libHandle, "netprof_new")
+
+	mustRegister(&tox_new_tcp_connections, libHandle, "new_tcp_connections")
+	mustRegister(&tox_do_tcp_connections, libHandle, "do_tcp_connections")
+	mustRegister(&tox_kill_tcp_connections, libHandle, "kill_tcp_connections")
+
+	mustRegister(&tox_add_tcp_relay_global, libHandle, "add_tcp_relay_global")
+	mustRegister(&tox_tcp_relay_is_valid, libHandle, "tcp_relay_is_valid")
+	mustRegister(&tox_tcp_connected_relays_count, libHandle, "tcp_connected_relays_count")
+	mustRegister(&tox_tcp_connections_count, libHandle, "tcp_connections_count")
+	mustRegister(&tox_set_tcp_onion_status, libHandle, "set_tcp_onion_status")
+
+	mustRegister(&tox_new_tcp_connection_to, libHandle, "new_tcp_connection_to")
+	mustRegister(&tox_kill_tcp_connection_to, libHandle, "kill_tcp_connection_to")
+	mustRegister(&tox_send_packet_tcp_connection, libHandle, "send_packet_tcp_connection")
+	mustRegister(&tox_tcp_send_onion_request, libHandle, "tcp_send_onion_request")
+	mustRegister(&tox_tcp_send_oob_packet_using_relay, libHandle, "tcp_send_oob_packet_using_relay")
+
+	mustRegister(&tox_set_oob_packet_tcp_connection_callback, libHandle, "set_oob_packet_tcp_connection_callback")
+	mustRegister(&tox_set_packet_tcp_connection_callback, libHandle, "set_packet_tcp_connection_callback")
+	mustRegister(&tox_logger_callback_log, libHandle, "logger_callback_log")
+
+	mustRegister(&tox_net_family_ipv4, libHandle, "net_family_ipv4")
+	mustRegister(&tox_net_htons, libHandle, "net_htons")
+	mustRegister(&tox_addr_parse_ip, libHandle, "addr_parse_ip")
+
+	mustRegister(&tox_crypto_new_keypair, libHandle, "crypto_new_keypair")
+
+	mustRegister(&tox_m_get_friend_connectionstatus, libHandle, "m_get_friend_connectionstatus")
+	mustRegister(&tox_friend_connection_crypt_connection_id, libHandle, "friend_connection_crypt_connection_id")
+	mustRegister(&tox_crypto_connection_status, libHandle, "crypto_connection_status")
+
+	mustRegister(&tox_getfriendcon_id, libHandle, "getfriendcon_id")
+	mustRegister(&tox_get_conn, libHandle, "get_conn")
+	mustRegister(&tox_friend_conn_get_dht_ip_port, libHandle, "friend_conn_get_dht_ip_port")
+	mustRegister(&tox_copy_connected_tcp_relays_index, libHandle, "copy_connected_tcp_relays_index")
+	mustRegister(&tox_net_family_ipv6, libHandle, "net_family_ipv6")
+}
+
+func mustRegister(fptr any, handle uintptr, name string) {
+	addr, err := purego.Dlsym(handle, name)
 	if err != nil {
-		panic("toxpriv: cannot open libtoxcore: " + err.Error())
+		panic("toxpriv: symbol " + name + " not found")
 	}
-	purego.RegisterLibFunc(&toxGroupPeerGetIPAddress, libHandle, "tox_group_peer_get_ip_address")
-	purego.RegisterLibFunc(&toxErrGroupPeerQueryToString, libHandle, "tox_err_group_peer_query_to_string")
-	purego.RegisterLibFunc(&toxSetAVObject, libHandle, "tox_set_av_object")
-	purego.RegisterLibFunc(&toxGetAVObject, libHandle, "tox_get_av_object")
-	purego.RegisterLibFunc(&toxLock, libHandle, "tox_lock")
-	purego.RegisterLibFunc(&toxUnlock, libHandle, "tox_unlock")
-
-	purego.RegisterLibFunc(&tox_os_memory, libHandle, "os_memory")
-	purego.RegisterLibFunc(&tox_os_random, libHandle, "os_random")
-	purego.RegisterLibFunc(&tox_os_network, libHandle, "os_network")
-	purego.RegisterLibFunc(&tox_logger_new, libHandle, "logger_new")
-	purego.RegisterLibFunc(&tox_mono_time_new, libHandle, "mono_time_new")
-	purego.RegisterLibFunc(&tox_netprof_new, libHandle, "netprof_new")
-
-	purego.RegisterLibFunc(&tox_new_tcp_connections, libHandle, "new_tcp_connections")
-	purego.RegisterLibFunc(&tox_do_tcp_connections, libHandle, "do_tcp_connections")
-	purego.RegisterLibFunc(&tox_kill_tcp_connections, libHandle, "kill_tcp_connections")
-
-	purego.RegisterLibFunc(&tox_add_tcp_relay_global, libHandle, "add_tcp_relay_global")
-	purego.RegisterLibFunc(&tox_tcp_relay_is_valid, libHandle, "tcp_relay_is_valid")
-	purego.RegisterLibFunc(&tox_tcp_connected_relays_count, libHandle, "tcp_connected_relays_count")
-	purego.RegisterLibFunc(&tox_tcp_connections_count, libHandle, "tcp_connections_count")
-	purego.RegisterLibFunc(&tox_set_tcp_onion_status, libHandle, "set_tcp_onion_status")
-
-	purego.RegisterLibFunc(&tox_new_tcp_connection_to, libHandle, "new_tcp_connection_to")
-	purego.RegisterLibFunc(&tox_kill_tcp_connection_to, libHandle, "kill_tcp_connection_to")
-	purego.RegisterLibFunc(&tox_send_packet_tcp_connection, libHandle, "send_packet_tcp_connection")
-	purego.RegisterLibFunc(&tox_tcp_send_onion_request, libHandle, "tcp_send_onion_request")
-	purego.RegisterLibFunc(&tox_tcp_send_oob_packet_using_relay, libHandle, "tcp_send_oob_packet_using_relay")
-
-	purego.RegisterLibFunc(&tox_set_oob_packet_tcp_connection_callback, libHandle, "set_oob_packet_tcp_connection_callback")
-	purego.RegisterLibFunc(&tox_set_packet_tcp_connection_callback, libHandle, "set_packet_tcp_connection_callback")
-	purego.RegisterLibFunc(&tox_logger_callback_log, libHandle, "logger_callback_log")
-
-	purego.RegisterLibFunc(&tox_net_family_ipv4, libHandle, "net_family_ipv4")
-	purego.RegisterLibFunc(&tox_net_htons, libHandle, "net_htons")
-	purego.RegisterLibFunc(&tox_addr_parse_ip, libHandle, "addr_parse_ip")
-
-	purego.RegisterLibFunc(&tox_crypto_new_keypair, libHandle, "crypto_new_keypair")
-
-	purego.RegisterLibFunc(&tox_m_get_friend_connectionstatus, libHandle, "m_get_friend_connectionstatus")
-	purego.RegisterLibFunc(&tox_friend_connection_crypt_connection_id, libHandle, "friend_connection_crypt_connection_id")
-	purego.RegisterLibFunc(&tox_crypto_connection_status, libHandle, "crypto_connection_status")
-
-	purego.RegisterLibFunc(&tox_getfriendcon_id, libHandle, "getfriendcon_id")
-	purego.RegisterLibFunc(&tox_get_conn, libHandle, "get_conn")
-	purego.RegisterLibFunc(&tox_friend_conn_get_dht_ip_port, libHandle, "friend_conn_get_dht_ip_port")
-	purego.RegisterLibFunc(&tox_copy_connected_tcp_relays_index, libHandle, "copy_connected_tcp_relays_index")
-	purego.RegisterLibFunc(&tox_net_family_ipv6, libHandle, "net_family_ipv6")
+	purego.RegisterFunc(fptr, addr)
 }
 
 func goString(ptr unsafe.Pointer) string {
