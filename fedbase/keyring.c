@@ -1,3 +1,5 @@
+//go:build ignore
+
 #include "keyring.h"
 #include <stdio.h>
 #include <stdlib.h>

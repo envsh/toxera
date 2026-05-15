@@ -306,6 +306,10 @@ func (kr *KeyRing) String() string {
 
 // ------- internal helpers -------
 
+func (kr *KeyRing) Ed25519Pub() []byte {
+	return kr.ed25519Pub()
+}
+
 func (kr *KeyRing) ed25519Pub() []byte {
 	return []byte(kr.BTDHTKey().Public().(ed25519.PublicKey))
 }
