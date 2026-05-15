@@ -17,6 +17,8 @@ fn load_data() &BootstrapData {
 }
 
 const data_toml = $embed_file("bootstrap_data.toml")
+const data_full_json = $embed_file("bootstrap.json")
+
 pub const d = load_data() // &BootstrapData{}
 pub struct BootstrapData {
     pub:
