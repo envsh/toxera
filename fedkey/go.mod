@@ -1,4 +1,4 @@
-module github.com/envsh/toxera/fedbase
+module github.com/envsh/toxera/fedkey
 
 go 1.21.0
 

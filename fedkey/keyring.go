@@ -1,4 +1,4 @@
-package fedbase
+package fedkey
 
 import (
 	"bufio"
