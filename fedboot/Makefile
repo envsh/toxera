@@ -1,2 +1,2 @@
 all:
-	go build -v -tags eth,turn,btc
+	go build -v -tags eth,turn,btc,libp2p
