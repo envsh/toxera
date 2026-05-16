@@ -2,7 +2,15 @@ package fedboot
 
 import (
 	"reflect"
+	"log"
 )
+
+func init() {
+	flags := log.Flags()
+	flags |= log.Lshortfile
+	flags ^= log.Ldate
+	log.SetFlags(flags)
+}
 
 type Instance interface {
 	Start() error

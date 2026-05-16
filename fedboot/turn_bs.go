@@ -131,7 +131,7 @@ func bootstrap(cfg Config) error {
 	}
 
 	udpClient, err := turn.NewClient(&turn.ClientConfig{
-		STUNServerAddr: "stun.relay.metered.ca:80",
+		STUNServerAddr: chosenStun,
 		TURNServerAddr: chosenTurn,
 		Conn:           udpConn,
 		Username:       cfg.Username,
@@ -162,14 +162,14 @@ func bootstrap(cfg Config) error {
 	fmt.Println()
 
 	fmt.Println("=== Phase 2B: TCP TURN ===")
-	tcpRaw, err := net.Dial("tcp", "standard.relay.metered.ca:80")
+	tcpRaw, err := net.Dial("tcp", chosenTurn)
 	if err != nil {
 		return fmt.Errorf("tcp dial: %w", err)
 	}
 
 	tcpClient, err := turn.NewClient(&turn.ClientConfig{
-		STUNServerAddr: "stun.relay.metered.ca:80",
-		TURNServerAddr: "standard.relay.metered.ca:80",
+		STUNServerAddr: chosenStun,
+		TURNServerAddr: chosenTurn,
 		Conn:           turn.NewSTUNConn(tcpRaw),
 		Username:       cfg.Username,
 		Password:       cfg.Password,
@@ -219,14 +219,18 @@ func bootstrap(cfg Config) error {
 
 	tcpHealthLoop := func() {
 		dummy := &net.UDPAddr{IP: net.IPv4zero, Port: 0}
+		_ = dummy
 		fails := 0
 		for {
 			time.Sleep(10 * time.Second)
-			err = tcpClient.CreatePermission(dummy)
-			_, cerr := tcpAlloc.Dial("tcp", dummy.String())
+			err = tcpClient.CreatePermission(tcpAlloc.Addr())
+			if err != nil {
+				log.Println(err)
+			}
+			_, cerr := tcpAlloc.Dial("tcp", tcpAlloc.Addr().String())
 			if cerr != nil && !strings.Contains(cerr.Error(), "447") {
 				fails++
-				log.Printf("[!] TCP health check failed (%d/3): %v", fails, cerr)
+				log.Printf("[!] TCP health check failed (%d/3): %v %v", fails, cerr, tcpAlloc.Addr())
 				if fails >= 3 {
 				}
 				setTCPHealthy(false)
