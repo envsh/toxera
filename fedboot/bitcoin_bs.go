@@ -13,10 +13,11 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
-
+	
 	"github.com/envsh/toxera/fedkey"
 )
 
@@ -93,10 +94,11 @@ type BtcBootResult struct {
 }
 
 func mainBtc() {
-	keyFile := flag.String("k", "key.txt", "keyring file")
-	port := flag.Int("l", 8333, "TCP listen port")
-	timeoutSec := flag.Int("t", 120, "bootstrap timeout (seconds)")
-	flag.Parse()
+	fs := flag.NewFlagSet("btc", flag.ContinueOnError)
+	keyFile := fs.String("k", "key.txt", "keyring file")
+	port := fs.Int("l", 8333, "TCP listen port")
+	timeoutSec := fs.Int("t", 120, "bootstrap timeout (seconds)")
+	fs.Parse(os.Args[1:])
 
 	cfg := BtcBootConfig{
 		KeyFile:    *keyFile,

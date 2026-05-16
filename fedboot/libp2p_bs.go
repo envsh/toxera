@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -577,10 +578,11 @@ func mainLibp2p() {
 	}
 	fmt.Println()
 
-	keyFile := flag.String("k", "key.txt", "keyring file")
-	port := flag.Int("l", defaultListenPort, "TCP listen port")
-	timeoutSec := flag.Int("t", 120, "bootstrap timeout (seconds)")
-	flag.Parse()
+	fs := flag.NewFlagSet("libp2p", flag.ContinueOnError)
+	keyFile := fs.String("k", "key.txt", "keyring file")
+	port := fs.Int("l", defaultListenPort, "TCP listen port")
+	timeoutSec := fs.Int("t", 120, "bootstrap timeout (seconds)")
+	fs.Parse(os.Args[1:])
 
 	cfg := Libp2pBootConfig{
 		KeyFile:    *keyFile,

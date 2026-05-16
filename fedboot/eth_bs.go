@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/envsh/toxera/fedkey"
@@ -140,10 +141,11 @@ func Bootstrap(ctx context.Context, cfg BootConfig) (*BootResult, error) {
 
 
 func mainEth() {
-	keyFile := flag.String("k", "key.txt", "keyring file")
-	port := flag.Int("l", 30303, "listen port")
-	timeoutSec := flag.Int("t", 60, "bootstrap timeout (seconds)")
-	flag.Parse()
+	fs := flag.NewFlagSet("eth", flag.ContinueOnError)
+	keyFile := fs.String("k", "key.txt", "keyring file")
+	port := fs.Int("l", 30303, "listen port")
+	timeoutSec := fs.Int("t", 60, "bootstrap timeout (seconds)")
+	fs.Parse(os.Args[1:])
 
 	cfg := BootConfig{
 		KeyFile:    *keyFile,
@@ -159,4 +161,6 @@ func mainEth() {
 	fmt.Printf("   NodeID:    %x\n", res.NodeID[:8])
 	fmt.Printf("   Pubkey:    %s\n", res.PubkeyHex[:16]+"...")
 	fmt.Printf("   Boot time: %v\n", res.BootTime)
+
+	for { time.Sleep(time.Second) }
 }

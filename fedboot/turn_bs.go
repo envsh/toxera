@@ -66,19 +66,20 @@ var (
 )
 
 func mainTurn() {
-	stunFlag := flag.String("stun", "stun.relay.metered.ca:80,stun.cloudflare.com:3478", "comma-separated STUN server addresses (randomly selected)")
-	serverFlag := flag.String("s", "standard.relay.metered.ca:80", "comma-separated TURN server addresses (randomly selected)")
-	user := flag.String("u", "foo", "TURN username")
-	pass := flag.String("p", "bar", "TURN password")
-	keyFile := flag.String("k", "key.txt", "key file (seed=...)")
-	showHelp := flag.Bool("h", false, "show help")
-	flag.Parse()
+	fs := flag.NewFlagSet("turn", flag.ContinueOnError)
+	stunFlag := fs.String("stun", "stun.relay.metered.ca:80,stun.cloudflare.com:3478", "comma-separated STUN server addresses (randomly selected)")
+	serverFlag := fs.String("s", "standard.relay.metered.ca:80", "comma-separated TURN server addresses (randomly selected)")
+	user := fs.String("u", "foo", "TURN username")
+	pass := fs.String("p", "bar", "TURN password")
+	keyFile := fs.String("k", "key.txt", "key file (seed=...)")
+	showHelp := fs.Bool("h", false, "show help")
+	fs.Parse(os.Args[1:])
 
 	if *showHelp {
 		fmt.Println("Usage: turn_bs [options]")
 		fmt.Println()
 		fmt.Println("Options:")
-		flag.PrintDefaults()
+		fs.PrintDefaults()
 		fmt.Println()
 		fmt.Println("At startup, one STUN and one TURN server are randomly selected")
 		fmt.Println("from each comma-separated list.")
@@ -247,7 +248,7 @@ func bootstrap(cfg Config) error {
 	printStatus(seedHex, chosenStun, chosenTurn, publicAddr, udpRelay.LocalAddr(), tcpAlloc.Addr())
 
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	if false { signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM) }
 	<-sigCh
 	fmt.Println("\n[*] Shutting down...")
 	udpClient.Close()
