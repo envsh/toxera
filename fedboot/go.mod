@@ -1,4 +1,4 @@
-module fedboot
+module github.com/envsh/toxera/fedboot
 
 go 1.21.0
 
