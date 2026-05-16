@@ -12,6 +12,7 @@ import (
 	"os"
 	"sync"
 	"time"
+	"strings"
 
 	"github.com/envsh/toxera/fedkey"
 	"github.com/libp2p/go-libp2p"
@@ -24,6 +25,8 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/discovery/routing"
 	"github.com/libp2p/go-libp2p/p2p/host/autorelay"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
+	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
+	discovery "github.com/libp2p/go-libp2p/p2p/discovery/util"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	madns "github.com/multiformats/go-multiaddr-dns"
 	"github.com/multiformats/go-multiaddr"
@@ -137,14 +140,18 @@ func resolveAllDNSAddrsInit() {
 
 	for _, addrs := range resolvedMap {
 		for _, addr := range addrs {
+			if strings.Contains(addr, ":") || 
+				strings.Contains(addr, "/udp/") || strings.Contains(addr, "/wss/") {
+				continue
+			}
 			if !containsAddr(extraStaticRelays, addr) {
 				extraStaticRelays = append(extraStaticRelays, addr)
 			}
 		}
 	}
 
-	fmt.Printf("[*] 预解析完成，添加了 %d 个解析后的地址\n", len(extraStaticRelays))
-	fmt.Println(time.Since(btime))
+	fmt.Printf("[*] 预解析完成，添加了 %d 个解析后的地址, %v\n", len(extraStaticRelays), time.Since(btime))
+	fmt.Println()
 }
 
 func resolveAllDNSAddrsQuiet(ctx context.Context, addrStrs []string) map[string][]string {
@@ -680,6 +687,8 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 		),
 
 		libp2p.EnableHolePunching(),
+		libp2p.Transport(tcp.NewTCPTransport),
+		libp2p.UserAgent("universal-connectivity/go-peer"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create libp2p host: %w", err)
@@ -800,7 +809,7 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 	fmt.Println("[*] Starting Kademlia DHT in server mode...")
 
 	kadDHT, err := dht.New(bootCtx, h,
-		dht.Mode(dht.ModeServer),
+		dht.Mode(dht.ModeClient),
 		dht.BootstrapPeers(bootstrapInfos...),
 	)
 	if err != nil {
@@ -812,7 +821,9 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 	}
 
 	fmt.Println("[*] Waiting for DHT routing table to populate...")
+	testCID := "libp2p-bootstrap-test"
 	routingDiscovery := routing.NewRoutingDiscovery(kadDHT)
+	discovery.Advertise(ctx, routingDiscovery, testCID)
 	discoveredSet := make(map[peer.ID]struct{})
 	var discoveredMu sync.Mutex
 
@@ -826,10 +837,9 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	testCID := "libp2p-bootstrap-test"
+
 	findCtx, findCancel := context.WithTimeout(bootCtx, 10*time.Second)
 	defer findCancel()
-
 	peerChan, err := routingDiscovery.FindPeers(findCtx, testCID)
 	if err == nil {
 		for p := range peerChan {
