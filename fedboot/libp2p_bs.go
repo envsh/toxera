@@ -734,76 +734,7 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 	var (
 		oks   []Libp2pBsPeerInfo
 		noks  []string
-		oksMu sync.Mutex
-		noksMu sync.Mutex
-		wg    sync.WaitGroup
-		sem   = make(chan struct{}, 10)
 	)
-
-	for i := range bootstrapInfos {
-		ai := &bootstrapInfos[i]
-		wg.Add(1)
-		go func(info *peer.AddrInfo) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			connCtx, connCancel := context.WithTimeout(bootCtx, 25*time.Second)
-			defer connCancel()
-			btime := time.Now()
-
-			err := h.Connect(connCtx, *info)
-			if err != nil {
-				noksMu.Lock()
-				noks = append(noks, info.ID.String())
-				noksMu.Unlock()
-				fmt.Printf("  ✗ %s → %v\n", info.ID.ShortString(), err)
-				return
-			}
-
-			var conn network.Conn
-			for _, c := range h.Network().ConnsToPeer(info.ID) {
-				conn = c
-				break
-			}
-
-			relayCtx, relayCancel := context.WithTimeout(bootCtx, 5*time.Second)
-			defer relayCancel()
-			supportsRelay := supportsRelayHop(relayCtx, h, info.ID)
-
-			oksMu.Lock()
-			addrStr := "?"
-			if len(info.Addrs) > 0 {
-				addrStr = info.Addrs[0].String()
-			}
-			relayStatus := ""
-			if supportsRelay {
-				relayStatus = " [RELAY]"
-			}
-			oks = append(oks, Libp2pBsPeerInfo{
-				Addr:          addrStr,
-				PeerID:        info.ID,
-				Conn:          conn,
-				SupportsRelay: supportsRelay,
-			})
-			oksMu.Unlock()
-			fmt.Printf("  ✓ %s → CONNECTED%s %v\n", info.ID.ShortString(), relayStatus, time.Since(btime))
-		}(ai)
-	}
-	wg.Wait()
-
-	relayCount := 0
-	for _, p := range oks {
-		if p.SupportsRelay {
-			relayCount++
-		}
-	}
-	fmt.Printf("[+] %d/%d bootstrap connections succeeded\n", len(oks), len(bootstrapInfos))
-	fmt.Printf("[+] %d peers support relay hop\n\n", relayCount)
-
-	if len(oks) == 0 {
-		return nil, fmt.Errorf("failed to connect to any bootstrap peers")
-	}
 
 	fmt.Println("=== Phase 4: DHT Bootstrap ===")
 	fmt.Println("[*] Starting Kademlia DHT in server mode...")
@@ -827,16 +758,8 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 	discoveredSet := make(map[peer.ID]struct{})
 	var discoveredMu sync.Mutex
 
-	waitStart := time.Now()
-	for time.Since(waitStart) < 75*time.Second {
-		rtSize := kadDHT.RoutingTable().Size()
-		if rtSize >= 3 {
-			fmt.Printf("  ✓ Routing table has %d peers\n", rtSize)
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
+	if kadDHT.RoutingTable().Size() >= 3 {
 	}
-
 
 	findCtx, findCancel := context.WithTimeout(bootCtx, 10*time.Second)
 	defer findCancel()
@@ -859,25 +782,9 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 	discoveredCount := len(discoveredSet)
 	fmt.Printf("[+] Total discovered: %d unique peers\n\n", discoveredCount)
 
-	pingService := ping.NewPingService(h)
-	for i := range oks {
-		go func(p *Libp2pBsPeerInfo) {
-			for {
-				time.Sleep(30 * time.Second)
-				pingCtx, pingCancel := context.WithTimeout(context.Background(), 10*time.Second)
-				ch := pingService.Ping(pingCtx, p.PeerID)
-				select {
-				case res := <-ch:
-					if res.Error == nil {
-						continue
-					}
-				case <-pingCtx.Done():
-				}
-				pingCancel()
-				h.Network().ClosePeer(p.PeerID)
-				return
-			}
-		}(&oks[i])
+	if false { 
+		pingService := ping.NewPingService(h)
+		_ = pingService
 	}
 
 	relayAddrCount := 0
@@ -954,7 +861,7 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 		PubkeyHex:    pubHex,
 		BootstrapOK:  oks,
 		BootstrapNOK: noks,
-		RelayCount:   relayCount,
+		RelayCount:   0,
 		Discovered:   discoveredCount,
 		BootTime:     time.Since(start),
 		FullStatus:   fullStatus,
