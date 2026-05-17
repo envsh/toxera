@@ -15,8 +15,8 @@ type BoardResp struct {
 	PeerID    string         `json:"peer_id"`
 	Pubkey    string         `json:"pubkey"`
 	NATStatus string         `json:"nat_status"`
+	Relays0   int            `json:"relays0"`
 	Relays1   int            `json:"relays1"`
-	Relays2   int            `json:"relays2"`
 	Conns     int            `json:"connections"`
 	Addrs     int            `json:"listening_addrs"`
 	Bandwidth *BandwidthResp `json:"bandwidth"`
@@ -128,9 +128,9 @@ func CollectBoard() (BoardResp, error) {
 	return BoardResp{
 		PeerID:    h.ID().String(),
 		Pubkey:    bootres.PubkeyHex,
-		NATStatus: bootres.FullStatus.NATStatus.String(),
-		Relays1:    len(relays.Candidates),
-		Relays2:    len(relays.Connected),
+		NATStatus: bootres.NATStatus.String(),
+		Relays0:    len(relays.Candidates),
+		Relays1:    len(relays.Connected),
 		Conns:     len(conns),
 		Addrs:     len(addrs),
 		Bandwidth: bw,

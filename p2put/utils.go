@@ -4,7 +4,7 @@ import (
 	"net"
 	// "errors"
 	"time"
-	"fmt"
+	// "fmt"
 	"context"
 
 	"github.com/libp2p/go-libp2p/core/host"
@@ -81,74 +81,6 @@ func extractIPFromAddr(addr multiaddr.Multiaddr) net.IP {
 	return nil
 }
 
-func detectNATReachability(h host.Host) (NATReachability, string) {
-	addrs := h.Addrs()
-
-	hasPublicIP := false
-	hasRelayAddr := false
-	hasPrivateIP := false
-
-	for _, addr := range addrs {
-		if isRelayAddr(addr) {
-			hasRelayAddr = true
-			continue
-		}
-
-		ip := extractIPFromAddr(addr)
-		if ip == nil || ip.IsUnspecified() {
-			continue
-		}
-
-		if isPrivateIP(ip) {
-			hasPrivateIP = true
-		} else {
-			hasPublicIP = true
-		}
-	}
-
-	if hasRelayAddr && hasPrivateIP && !hasPublicIP {
-		return NATPrivate, "Only private IPs + relay addresses detected (AutoRelay active)"
-	}
-
-	if hasPublicIP && !hasRelayAddr {
-		return NATPublic, "Public IP detected, no relay addresses needed"
-	}
-
-	if hasPublicIP && hasRelayAddr {
-		return NATPublic, "Public IP detected (relay addresses may exist for incoming connections)"
-	}
-
-	if hasPrivateIP && !hasPublicIP && !hasRelayAddr {
-		return NATUnknown, "Private IPs only, but no relay addresses yet (AutoRelay may still be initializing)"
-	}
-
-	return NATUnknown, "Could not determine NAT status from available addresses"
-}
-
-func collectRelayStatus(h host.Host, connectedPeers []Libp2pBsPeerInfo) Libp2pRelayStatus {
-	relayAddrCount := 0
-	for _, addr := range h.Addrs() {
-		if isRelayAddr(addr) {
-			relayAddrCount++
-		}
-	}
-
-	supportingCount := 0
-	for _, p := range connectedPeers {
-		if p.SupportsRelay {
-			supportingCount++
-		}
-	}
-
-	return Libp2pRelayStatus{
-		StaticCandidates:    len(allStaticRelays),
-		ConnectedSupporting: supportingCount,
-		ListeningAddrs:      relayAddrCount,
-		TargetRelays:        5,
-		MinCandidates:       8,
-		BootDelay:           60 * time.Second,
-	}
-}
 
 func collectListeningAddrs(h host.Host) []Libp2pAddrInfo {
 	var addrs []Libp2pAddrInfo
@@ -171,89 +103,6 @@ func collectListeningAddrs(h host.Host) []Libp2pAddrInfo {
 	}
 
 	return addrs
-}
-
-func printFullStatus(status Libp2pFullStatus) {
-	fmt.Println()
-	fmt.Println("========================================")
-	fmt.Println("  ✅ LIBP2P ONLINE")
-	fmt.Println("========================================")
-
-	fmt.Println()
-	fmt.Println("  🔍 NAT / Reachability Status:")
-	fmt.Println()
-	fmt.Println("  [方式 A] 内置 AutoNAT:")
-	if status.AutoNATReady {
-		fmt.Printf("     Status:          %s\n", status.AutoNATStatus)
-	} else {
-		fmt.Printf("     Status:          %s (未完成检测)\n", status.AutoNATStatus)
-		fmt.Println("        Note: AutoNAT may still be probing. Check again later.")
-	}
-
-	fmt.Println()
-	fmt.Println("  [方式 B] 自定义地址分析:")
-	fmt.Printf("     Status:          %s\n", status.NATStatus)
-	fmt.Printf("     Indication:      %s\n", status.NATIndication)
-
-	fmt.Println()
-	fmt.Println("  📋 Detailed Listening Addrs:")
-	if len(status.ListeningAddrs) == 0 {
-		fmt.Println("     (No addresses)")
-	} else {
-		for i, info := range status.ListeningAddrs {
-			addrStr := info.Addr.String()
-			typeStr := ""
-			if info.IsRelay {
-				typeStr = "[RELAY]"
-			} else if info.IP != nil {
-				if info.IsPrivateIP {
-					typeStr = "[PRIVATE]"
-				} else {
-					typeStr = "[PUBLIC]"
-				}
-			} else {
-				typeStr = "[UNKNOWN]"
-			}
-			fmt.Printf("  [%02d] %s %s\n", i+1, typeStr, addrStr)
-		}
-	}
-
-	fmt.Println()
-	fmt.Println("  🔄 Relay Status:")
-	fmt.Printf("     Enabled:         Yes\n")
-	fmt.Printf("     Static Candidates:%d\n", status.Relay.StaticCandidates)
-	fmt.Printf("     Target Relays:   %d\n", status.Relay.TargetRelays)
-	fmt.Printf("     Min Candidates:  %d\n", status.Relay.MinCandidates)
-	fmt.Printf("     Boot Delay:      %s\n", status.Relay.BootDelay)
-	fmt.Printf("     Connected peers supporting relay: %d\n", status.Relay.ConnectedSupporting)
-	fmt.Printf("     Relay listen addrs: %d\n", status.Relay.ListeningAddrs)
-
-	if status.Relay.ListeningAddrs == 0 {
-		fmt.Println()
-		fmt.Println("     ⚠️  Note: AutoRelay may still be initializing")
-		fmt.Println("        Boot delay is 60s to allow DHT discovery first")
-		fmt.Println("        Relay addresses will appear once relays are selected")
-	}
-
-	fmt.Println()
-	fmt.Println("  👊 HolePunching Status:")
-	fmt.Printf("     Enabled:         Yes\n")
-	fmt.Printf("     Note:            Will attempt direct connections when possible\n")
-	fmt.Printf("                    Requires relayed connection as prerequisite\n")
-
-	fmt.Println()
-	fmt.Println("  📊 Network Info:")
-	fmt.Printf("     Peer ID:         %s\n", status.PeerID.String())
-	fmt.Printf("     Pubkey:          %s...\n", status.PubkeyHex)
-	if len(status.PubkeyHex) > 32 {
-		fmt.Printf("                    %s...\n", status.PubkeyHex[32:64])
-	}
-	fmt.Printf("     Active Peers:    %d\n", status.ActivePeers)
-	fmt.Printf("     Discovered:      %d peers\n", status.Discovered)
-	fmt.Printf("     Boot Time:       %s\n", status.BootTime)
-
-	fmt.Println()
-	fmt.Println("========================================")
 }
 
 func parseStaticRelays() []peer.AddrInfo {

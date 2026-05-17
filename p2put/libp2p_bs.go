@@ -71,34 +71,6 @@ const (
 	RelayStopProtocol = protocol.ID("/libp2p/circuit/relay/0.2.0/stop")
 )
 
-type NATReachability int
-
-const (
-	NATUnknown NATReachability = iota
-	NATPublic
-	NATPrivate
-)
-
-func (n NATReachability) String() string {
-	switch n {
-	case NATPublic:
-		return "Public"
-	case NATPrivate:
-		return "Private"
-	default:
-		return "Unknown"
-	}
-}
-
-type Libp2pRelayStatus struct {
-	StaticCandidates    int
-	ConnectedSupporting int
-	ListeningAddrs      int
-	TargetRelays        int
-	MinCandidates       int
-	BootDelay           time.Duration
-}
-
 type Libp2pAddrInfo struct {
 	Addr        multiaddr.Multiaddr
 	IsRelay     bool
@@ -106,20 +78,6 @@ type Libp2pAddrInfo struct {
 	IP          net.IP
 }
 
-type Libp2pFullStatus struct {
-	NATStatus        NATReachability
-	NATIndication    string
-	AutoNATStatus    network.Reachability
-	AutoNATReady     bool
-	Relay            Libp2pRelayStatus
-	HolePunching     bool
-	PeerID           peer.ID
-	PubkeyHex        string
-	ActivePeers      int
-	Discovered       int
-	BootTime         time.Duration
-	ListeningAddrs   []Libp2pAddrInfo
-}
 
 var libp2pBootstrap = []string{
 	"/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
@@ -129,6 +87,11 @@ var libp2pBootstrap = []string{
 	"/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
 }
 
+func init() {
+	if len(libp2pBootstrap) != len(dht.DefaultBootstrapPeers) {
+		log.Println("Need update bootstrap data")
+	}
+}
 
 type Libp2pSeedResult struct {
 	Addr    multiaddr.Multiaddr
@@ -156,19 +119,16 @@ type Libp2pBootResult struct {
 	Bwc           metrics.Reporter
 	PeerID        peer.ID
 	PubkeyHex     string
-	BootstrapOK   []Libp2pBsPeerInfo
-	BootstrapNOK  []string
-	RelayCount    int
-	Discovered    int
 	BootTime      time.Duration
-	FullStatus    Libp2pFullStatus
+
+	NATStatus        network.Reachability
 }
 
 
 func mainLibp2p() {
-	resolveAllDNSAddrsInit()
 	fmt.Println("=== DNSADDR 解析结果汇总 ===")
 	fmt.Printf("[*] 原始 bootstrap 地址: %d 个\n", len(libp2pBootstrap))
+	resolveAllDNSAddrsInit()
 	fmt.Printf("[*] 解析后的额外地址: %d 个\n", len(extraStaticRelays))
 	fmt.Printf("[*] 总候选地址: %d 个\n", len(allStaticRelays))
 	fmt.Println()
@@ -198,12 +158,32 @@ func mainLibp2p() {
 		panic(err)
 	}
 
-	printFullStatus(res.FullStatus)
+	myDumpBoot(res.Host, res.DHT)
 	bootres = res
 
 	select {}
 }
 
+// []string => []peer.AddrInfo
+// use for DHT
+func filterConvertBootstrapInfos() []peer.AddrInfo {
+	bootstrapInfos := make([]peer.AddrInfo, 0, len(libp2pBootstrap))
+	for _, addrStr := range libp2pBootstrap {
+		ma, err := multiaddr.NewMultiaddr(addrStr)
+		if err != nil {
+			fmt.Printf("  ✗ invalid multiaddr: %s\n", addrStr)
+			continue
+		}
+		ai, err := peer.AddrInfoFromP2pAddr(ma)
+		if err != nil {
+			fmt.Printf("  ✗ failed to parse: %s\n", addrStr)
+			continue
+		}
+		bootstrapInfos = append(bootstrapInfos, *ai)
+		fmt.Printf("  ✓ %s → %s\n", ai.ID.ShortString(), ai.Addrs[0])
+	}
+	return bootstrapInfos
+}
 
 func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResult, error) {
 	start := time.Now()
@@ -274,37 +254,15 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 	fmt.Println("=== Phase 2: Bootstrap Node Resolution ===")
 	fmt.Printf("[*] Resolving %d bootstrap nodes...\n", len(libp2pBootstrap))
 
-	bootstrapInfos := make([]peer.AddrInfo, 0, len(libp2pBootstrap))
-	for _, addrStr := range libp2pBootstrap {
-		ma, err := multiaddr.NewMultiaddr(addrStr)
-		if err != nil {
-			fmt.Printf("  ✗ invalid multiaddr: %s\n", addrStr)
-			continue
-		}
-		ai, err := peer.AddrInfoFromP2pAddr(ma)
-		if err != nil {
-			fmt.Printf("  ✗ failed to parse: %s\n", addrStr)
-			continue
-		}
-		bootstrapInfos = append(bootstrapInfos, *ai)
-		fmt.Printf("  ✓ %s → %s\n", ai.ID.ShortString(), ai.Addrs[0])
-	}
-	fmt.Printf("[+] %d bootstrap peers ready\n\n", len(bootstrapInfos))
+	bootstrapInfos := filterConvertBootstrapInfos()
 
+	fmt.Printf("[+] %d bootstrap peers ready\n\n", len(bootstrapInfos))
 	if len(bootstrapInfos) == 0 {
 		return nil, fmt.Errorf("no valid bootstrap nodes")
 	}
 
-	fmt.Println("=== Phase 3: Connecting to Bootstrap Peers ===")
-	fmt.Printf("[*] Connecting to %d bootstrap peers...\n", len(bootstrapInfos))
-
-	var (
-		oks   []Libp2pBsPeerInfo
-		noks  []string
-	)
-
-	fmt.Println("=== Phase 4: DHT Bootstrap ===")
-	fmt.Println("[*] Starting Kademlia DHT in server mode...")
+	fmt.Println("=== Phase 3: DHT Bootstrap ===")
+	fmt.Println("[*] Starting Kademlia DHT in client mode...")
 
 	kadDHT, err := dht.New(bootCtx, h,
 		dht.Mode(dht.ModeClient),
@@ -319,100 +277,22 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 	}
 
 	fmt.Println("[*] Waiting for DHT routing table to populate...")
-	testCID := "libp2p-bootstrap-test"
 	routingDiscovery := routing.NewRoutingDiscovery(kadDHT)
-	discovery.Advertise(ctx, routingDiscovery, testCID)
-
-	if kadDHT.RoutingTable().Size() >= 3 {
-	}
-	btime := time.Now()
-	discoveredSet := myDiscoveryV1(bootCtx, routingDiscovery, testCID, myID)
-	log.Println("discovery...", len(discoveredSet), time.Since(btime))
-
-	GetCurrConns := func() (discoveredSet map[peer.ID]struct{}) {
-		for _, conn := range h.Network().Conns() {
-			discoveredSet[conn.RemotePeer()] = struct{}{}
-		}
-		return discoveredSet
-	}
-	for k,v := range GetCurrConns() {
-		discoveredSet[k] = v
-	}
-	discoveredCount := len(discoveredSet)
-	fmt.Printf("[+] Total discovered: %d unique peers\n\n", discoveredCount)
+	testCID := "libp2p-bootstrap-test"
+	discovery.Advertise(ctx, routingDiscovery, testCID) // broadcast self
 
 	if false {
 		pingService := ping.NewPingService(h)
 		_ = pingService
 	}
 
-	relayAddrCount := 0
-	fmt.Println("=== Phase 5: Go Online ===")
+	fmt.Println("=== Phase 4: Go Online ===")
 	fmt.Printf("[*] Node is now online. Press Ctrl+C to exit.\n")
-	fmt.Printf("[*] Listening on:\n")
-	for _, addr := range h.Addrs() {
-		addrStr := addr.String()
-		isRelay := false
-		for _, proto := range addr.Protocols() {
-			if proto.Name == "p2p-circuit" {
-				isRelay = true
-				break
-			}
-		}
-		if isRelay {
-			relayAddrCount++
-			fmt.Printf("    [RELAY] %s/p2p/%s\n", addrStr, myID)
-		} else {
-			fmt.Printf("            %s/p2p/%s\n", addrStr, myID)
-		}
-	}
-	fmt.Println()
-
-	fmt.Printf("[*] Connected peers:\n")
-	for i, p := range oks {
-		short := p.PeerID.ShortString()
-		relayMark := ""
-		if p.SupportsRelay {
-			relayMark = " [RELAY]"
-		}
-		fmt.Printf("  [%02d] %s  %s%s\n", i+1, short, p.Addr, relayMark)
-	}
-	fmt.Println()
 
 	myEventSuber(h, new(event.EvtLocalReachabilityChanged),
 		new(event.EvtPeerConnectednessChanged))
 
-	fmt.Println("=== Phase 5.5: Waiting for AutoNAT ===")
-	fmt.Println("[*] Waiting for AutoNAT to detect NAT status...")
-
-	autoNATStatus := network.ReachabilityUnknown
-	autoNATReady := false
-
-	if autoNATReady {
-		fmt.Printf("    [AutoNAT] Detected: %s\n", autoNATStatus)
-	} else {
-		fmt.Printf("    [AutoNAT] Timeout, current status: %s\n", autoNATStatus)
-	}
-	fmt.Println()
-
-	natStatus, natIndication := detectNATReachability(h)
-	relayStatus := collectRelayStatus(h, oks)
-	listeningAddrs := collectListeningAddrs(h)
-
-	fullStatus := Libp2pFullStatus{
-		NATStatus:        natStatus,
-		NATIndication:    natIndication,
-		AutoNATStatus:    autoNATStatus,
-		AutoNATReady:     autoNATReady,
-		Relay:            relayStatus,
-		HolePunching:     true,
-		PeerID:           myID,
-		PubkeyHex:        pubHex,
-		ActivePeers:      len(oks),
-		Discovered:       discoveredCount,
-		BootTime:         time.Since(start),
-		ListeningAddrs:   listeningAddrs,
-	}
+	fmt.Println("=== Phase 4.5: Waiting for AutoNAT ===")
 
 	log.Println("bootstrap ret...")
 	return &Libp2pBootResult{
@@ -421,12 +301,7 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 		Bwc:          bwc,
 		PeerID:       myID,
 		PubkeyHex:    pubHex,
-		BootstrapOK:  oks,
-		BootstrapNOK: noks,
-		RelayCount:   0,
-		Discovered:   discoveredCount,
 		BootTime:     time.Since(start),
-		FullStatus:   fullStatus,
 	}, nil
 }
 
@@ -463,9 +338,26 @@ func myEventSuber(h host.Host, evts ...any) {
 				case network.ReachabilityPrivate:  // NAT 后面
 				case network.ReachabilityUnknown:  // 未知（探测中）
 				}
+				bootres.NATStatus = e.Reachability
 			case event.EvtPeerConnectednessChanged:
 
 			}
 		}
 	}()
+}
+
+func myDumpBoot(h host.Host, dht *dht.IpfsDHT) {
+
+	dhtsz := dht.RoutingTable().Size()
+	conns := GetCurrConns(h)
+
+	log.Printf("conns %v, dht %v", len(conns), dhtsz)
+	log.Println()
+}
+
+func GetCurrConns (h host.Host) (discoveredSet map[peer.ID]struct{}) {
+	for _, conn := range h.Network().Conns() {
+		discoveredSet[conn.RemotePeer()] = struct{}{}
+	}
+	return discoveredSet
 }

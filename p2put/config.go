@@ -17,6 +17,8 @@ type Config struct {
 	Quic  bool
 	Bw   bool
 	Port int
+	Punching bool
+	AutoPing bool
 }
 
 var dftConfig = Config{
@@ -25,6 +27,7 @@ var dftConfig = Config{
 	Relay: true,
 	NAT: true,
 	Tcp: true,
+	Punching: true,
 }
 var currConfig = dftConfig
 
@@ -34,7 +37,16 @@ func DefaultConfig() Config { return dftConfig }
 // usage: libp2p.New(libp2p.ResourceManager(myResourcemanager()),
 func myResourceManager() network.ResourceManager {
 	limits := rcmgr.DefaultLimits
-	limits.SystemBaseLimit = rcmgr.BaseLimit{Conns: 32/2, ConnsInbound: 16/2, ConnsOutbound: 16/2, Streams: 64/2, StreamsInbound: 32/2, StreamsOutbound: 32/2, FD: 32/2, Memory: 128 << 20/2}
+	limits.SystemBaseLimit = rcmgr.BaseLimit{
+		Conns: 32/2,
+		ConnsInbound: 16/2,
+		ConnsOutbound: 16/2,
+		Streams: 64/2,
+		StreamsInbound: 32/2,
+		StreamsOutbound: 32/2,
+		FD: 32/2,
+		Memory: (128 << 20)/2,
+	}
 	rm, _ := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(limits.Scale(0, 0)))
 
 	return rm

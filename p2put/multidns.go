@@ -8,14 +8,10 @@ import (
 
 	madns "github.com/multiformats/go-multiaddr-dns"
 	"github.com/multiformats/go-multiaddr"
-
 )
 
 var extraStaticRelays []string
 
-func init() {
-	// resolveAllDNSAddrsInit()
-}
 func resolveAllDNSAddrsInit() {
 	fmt.Println("=== [init] DNSADDR 预解析 ===")
 	ctx := context.Background()
