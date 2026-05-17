@@ -8,9 +8,9 @@ import (
 	"context"
 
 	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/core/network"
+	// "github.com/libp2p/go-libp2p/core/network"
 	"github.com/multiformats/go-multiaddr"
-	"github.com/libp2p/go-libp2p/core/event"
+	// "github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
@@ -171,32 +171,6 @@ func collectListeningAddrs(h host.Host) []Libp2pAddrInfo {
 	}
 
 	return addrs
-}
-
-func waitForAutoNAT(h host.Host, maxWait time.Duration) (network.Reachability, bool) {
-	sub, err := h.EventBus().Subscribe(new(event.EvtLocalReachabilityChanged))
-	if err != nil {
-		return network.ReachabilityUnknown, false
-	}
-	defer sub.Close()
-
-	deadline := time.Now().Add(maxWait)
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	for time.Now().Before(deadline) {
-		select {
-		case e := <-sub.Out():
-			evt, ok := e.(event.EvtLocalReachabilityChanged)
-			if ok && evt.Reachability != network.ReachabilityUnknown {
-				return evt.Reachability, true
-			}
-		case <-ticker.C:
-			continue
-		}
-	}
-
-	return network.ReachabilityUnknown, false
 }
 
 func printFullStatus(status Libp2pFullStatus) {

@@ -10,14 +10,16 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"sync"
+	"log"
+	// "sync"
 	"time"
 	// "strings"
+	// "reflect"
 
 	"github.com/envsh/toxera/fedkey"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/crypto"
-	// "github.com/libp2p/go-libp2p/core/event"
+	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -313,30 +315,22 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 	testCID := "libp2p-bootstrap-test"
 	routingDiscovery := routing.NewRoutingDiscovery(kadDHT)
 	discovery.Advertise(ctx, routingDiscovery, testCID)
-	discoveredSet := make(map[peer.ID]struct{})
-	var discoveredMu sync.Mutex
 
 	if kadDHT.RoutingTable().Size() >= 3 {
 	}
+	btime := time.Now()
+	discoveredSet := myDiscoveryV1(bootCtx, routingDiscovery, testCID, myID)
+	log.Println("discovery...", len(discoveredSet), time.Since(btime))
 
-	findCtx, findCancel := context.WithTimeout(bootCtx, 10*time.Second)
-	defer findCancel()
-	peerChan, err := routingDiscovery.FindPeers(findCtx, testCID)
-	if err == nil {
-		for p := range peerChan {
-			if p.ID == myID || p.ID == "" {
-				continue
-			}
-			discoveredMu.Lock()
-			discoveredSet[p.ID] = struct{}{}
-			discoveredMu.Unlock()
+	GetCurrConns := func() (discoveredSet map[peer.ID]struct{}) {
+		for _, conn := range h.Network().Conns() {
+			discoveredSet[conn.RemotePeer()] = struct{}{}
 		}
+		return discoveredSet
 	}
-
-	for _, conn := range h.Network().Conns() {
-		discoveredSet[conn.RemotePeer()] = struct{}{}
+	for k,v := range GetCurrConns() {
+		discoveredSet[k] = v
 	}
-
 	discoveredCount := len(discoveredSet)
 	fmt.Printf("[+] Total discovered: %d unique peers\n\n", discoveredCount)
 
@@ -378,14 +372,15 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 	}
 	fmt.Println()
 
+	myEventSuber(h, new(event.EvtLocalReachabilityChanged),
+		new(event.EvtPeerConnectednessChanged))
+
 	fmt.Println("=== Phase 5.5: Waiting for AutoNAT ===")
 	fmt.Println("[*] Waiting for AutoNAT to detect NAT status...")
 
 	autoNATStatus := network.ReachabilityUnknown
 	autoNATReady := false
 
-	fmt.Println("    [AutoNAT] Waiting up to 60 seconds for reachability detection...")
-	autoNATStatus, autoNATReady = waitForAutoNAT(h, 60*time.Second)
 	if autoNATReady {
 		fmt.Printf("    [AutoNAT] Detected: %s\n", autoNATStatus)
 	} else {
@@ -412,6 +407,7 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 		ListeningAddrs:   listeningAddrs,
 	}
 
+	log.Println("bootstrap ret...")
 	return &Libp2pBootResult{
 		Host:         h,
 		DHT:          kadDHT,
@@ -424,4 +420,44 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 		BootTime:     time.Since(start),
 		FullStatus:   fullStatus,
 	}, nil
+}
+
+func myDiscoveryV1 (bootCtx context.Context, routingDiscovery *routing.RoutingDiscovery, testCID string, myID peer.ID) (discoveredSet map[peer.ID]struct{}) {
+	findCtx, findCancel := context.WithTimeout(bootCtx, 10*time.Second)
+	defer findCancel()
+	peerChan, err := routingDiscovery.FindPeers(findCtx, testCID)
+	if err == nil {
+		for p := range peerChan {
+			if p.ID == myID || p.ID == "" {
+				continue
+			}
+			discoveredSet[p.ID] = struct{}{}
+		}
+	} else {
+		log.Println(err)
+	}
+	return
+}
+
+// new(event.EvtLocalReachabilityChanged)...
+func myEventSuber(h host.Host, evts ...any) {
+	// sub, err := h.EventBus().Subscribe(new(event.EvtLocalReachabilityChanged))
+	sub, err := h.EventBus().Subscribe(evts)
+	if err != nil { panic(err) }
+	go func() {
+		for evt := range sub.Out() {
+			log.Printf("<< %+v %v\n", evt, "") // reflect.TypeOf(evt)
+			switch e := evt.(type) {
+			case event.EvtLocalReachabilityChanged:
+				// evt.Reachability: network.Reachability
+				switch e.Reachability {
+				case network.ReachabilityPublic:   // 公网可达
+				case network.ReachabilityPrivate:  // NAT 后面
+				case network.ReachabilityUnknown:  // 未知（探测中）
+				}
+			case event.EvtPeerConnectednessChanged:
+
+			}
+		}
+	}()
 }

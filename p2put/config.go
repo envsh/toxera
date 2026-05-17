@@ -32,7 +32,7 @@ func DefaultConfig() Config { return dftConfig }
 // usage: libp2p.New(libp2p.ResourceManager(myResourcemanager()),
 func myResourceManager() network.ResourceManager {
 	limits := rcmgr.DefaultLimits
-	limits.SystemBaseLimit = rcmgr.BaseLimit{Conns: 32, ConnsInbound: 16, ConnsOutbound: 16, Streams: 64, StreamsInbound: 32, StreamsOutbound: 32, FD: 32, Memory: 128 << 20}
+	limits.SystemBaseLimit = rcmgr.BaseLimit{Conns: 32/2, ConnsInbound: 16/2, ConnsOutbound: 16/2, Streams: 64/2, StreamsInbound: 32/2, StreamsOutbound: 32/2, FD: 32/2, Memory: 128 << 20/2}
 	rm, _ := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(limits.Scale(0, 0)))
 
 	return rm

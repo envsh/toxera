@@ -14,7 +14,7 @@ import (
 var extraStaticRelays []string
 
 func init() {
-	resolveAllDNSAddrsInit()
+	// resolveAllDNSAddrsInit()
 }
 func resolveAllDNSAddrsInit() {
 	fmt.Println("=== [init] DNSADDR 预解析 ===")
