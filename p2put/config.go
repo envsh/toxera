@@ -15,6 +15,8 @@ type Config struct {
 	Tcp   bool
 	Wss   bool
 	Quic  bool
+	Bw   bool
+	Port int
 }
 
 var dftConfig = Config{

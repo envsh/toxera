@@ -26,6 +26,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/p2p/discovery/routing"
 	"github.com/libp2p/go-libp2p/p2p/host/autorelay"
+	"github.com/libp2p/go-libp2p/core/metrics"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	discovery "github.com/libp2p/go-libp2p/p2p/discovery/util"
@@ -152,6 +153,7 @@ type Libp2pBootConfig struct {
 type Libp2pBootResult struct {
 	Host          host.Host
 	DHT           *dht.IpfsDHT
+	Bwc           metrics.Reporter
 	PeerID        peer.ID
 	PubkeyHex     string
 	BootstrapOK   []Libp2pBsPeerInfo
@@ -197,6 +199,7 @@ func mainLibp2p() {
 	}
 
 	printFullStatus(res.FullStatus)
+	bootres = res
 
 	select {}
 }
@@ -232,6 +235,8 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 
 	fmt.Println("=== Phase 1.5: Creating Host with Relay/AutoRelay/HolePunching ===")
 
+	bwc := metrics.NewBandwidthCounter()
+
 	h, err := libp2p.New(
 		libp2p.Identity(libp2pPriv),
 		libp2p.ListenAddrs(listenAddr),
@@ -249,6 +254,8 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 		libp2p.EnableHolePunching(),
 		libp2p.Transport(tcp.NewTCPTransport),
 		libp2p.UserAgent("universal-connectivity/go-peer"),
+
+		libp2p.BandwidthReporter(bwc),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create libp2p host: %w", err)
@@ -411,6 +418,7 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 	return &Libp2pBootResult{
 		Host:         h,
 		DHT:          kadDHT,
+		Bwc:          bwc,
 		PeerID:       myID,
 		PubkeyHex:    pubHex,
 		BootstrapOK:  oks,

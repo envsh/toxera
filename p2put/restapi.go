@@ -1,12 +1,11 @@
 package p2put
 
-
 import (
+	"encoding/json"
 	"net/http"
 	"path/filepath"
 )
 
-// mux can nil, then http.DefaultServemux
 func InstallRestHandler(path string, mux *http.ServeMux) {
 	if mux == nil {
 		mux = http.DefaultServeMux
@@ -20,22 +19,60 @@ func InstallRestHandler(path string, mux *http.ServeMux) {
 	myinstall("dht", onDHT)
 	myinstall("conns", onConns)
 	myinstall("peers", onPeers)
+}
 
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(v)
+}
+
+func writeErr(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
 func onBoard(w http.ResponseWriter, r *http.Request) {
-
+	resp, err := CollectBoard()
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	writeJSON(w, resp)
 }
+
 func onDHT(w http.ResponseWriter, r *http.Request) {
-
+	resp, err := CollectDHT()
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	writeJSON(w, resp)
 }
-func onRelays(w http.ResponseWriter, r *http.Request) {
 
+func onRelays(w http.ResponseWriter, r *http.Request) {
+	resp, err := CollectRelays()
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	writeJSON(w, resp)
 }
 
 func onPeers(w http.ResponseWriter, r *http.Request) {
-
+	resp, err := CollectConns()
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	writeJSON(w, resp)
 }
-func onConns(w http.ResponseWriter, r *http.Request) {
 
+func onConns(w http.ResponseWriter, r *http.Request) {
+	resp, err := CollectConns()
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	writeJSON(w, resp)
 }
