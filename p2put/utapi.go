@@ -12,14 +12,29 @@ import (
 var bootres *Libp2pBootResult
 
 type BoardResp struct {
-	PeerID    string        `json:"peer_id"`
-	Pubkey    string        `json:"pubkey"`
-	NATStatus string        `json:"nat_status"`
-	Relays1    int     `json:"relays1"`
-	Relays2    int     `json:"relays2"`
-	Conns     int    `json:"connections"`
-	Addrs     int    `json:"listening_addrs"`
+	PeerID    string         `json:"peer_id"`
+	Pubkey    string         `json:"pubkey"`
+	NATStatus string         `json:"nat_status"`
+	Relays1   int            `json:"relays1"`
+	Relays2   int            `json:"relays2"`
+	Conns     int            `json:"connections"`
+	Addrs     int            `json:"listening_addrs"`
 	Bandwidth *BandwidthResp `json:"bandwidth"`
+	Resources *ResourcesResp `json:"resources,omitempty"`
+}
+
+type ResourcesResp struct {
+	System    ScopeStatResp `json:"system"`
+	Transient ScopeStatResp `json:"transient"`
+}
+
+type ScopeStatResp struct {
+	StreamsIn  int   `json:"streams_in"`
+	StreamsOut int   `json:"streams_out"`
+	ConnsIn    int   `json:"connections_in"`
+	ConnsOut   int   `json:"connections_out"`
+	FD         int   `json:"fd"`
+	Memory     int64 `json:"memory_bytes"`
 }
 
 type BandwidthResp struct {
@@ -80,6 +95,36 @@ func CollectBoard() (BoardResp, error) {
 		}
 	}
 
+	var res *ResourcesResp
+	if rm := h.Network().ResourceManager(); rm != nil {
+		var sys, trans ScopeStatResp
+		rm.ViewSystem(func(s network.ResourceScope) error {
+			st := s.Stat()
+			sys = ScopeStatResp{
+				StreamsIn:  st.NumStreamsInbound,
+				StreamsOut: st.NumStreamsOutbound,
+				ConnsIn:    st.NumConnsInbound,
+				ConnsOut:   st.NumConnsOutbound,
+				FD:         st.NumFD,
+				Memory:     st.Memory,
+			}
+			return nil
+		})
+		rm.ViewTransient(func(s network.ResourceScope) error {
+			st := s.Stat()
+			trans = ScopeStatResp{
+				StreamsIn:  st.NumStreamsInbound,
+				StreamsOut: st.NumStreamsOutbound,
+				ConnsIn:    st.NumConnsInbound,
+				ConnsOut:   st.NumConnsOutbound,
+				FD:         st.NumFD,
+				Memory:     st.Memory,
+			}
+			return nil
+		})
+		res = &ResourcesResp{System: sys, Transient: trans}
+	}
+
 	return BoardResp{
 		PeerID:    h.ID().String(),
 		Pubkey:    bootres.PubkeyHex,
@@ -89,6 +134,7 @@ func CollectBoard() (BoardResp, error) {
 		Conns:     len(conns),
 		Addrs:     len(addrs),
 		Bandwidth: bw,
+		Resources: res,
 	}, nil
 }
 
