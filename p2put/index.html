@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>p2put Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;padding:20px;font-size:14px}
+h1{color:#58a6ff;margin-bottom:20px;font-size:20px}
+.tabs{display:flex;gap:4px;margin-bottom:20px;flex-wrap:wrap}
+.tab{padding:8px 16px;background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;cursor:pointer;font-size:13px;user-select:none}
+.tab:hover{background:#30363d}
+.tab.active{background:#1f6feb;border-color:#1f6feb;color:#fff}
+#content{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:16px;min-height:200px}
+.loading,.error{padding:20px;text-align:center;color:#8b949e}
+.error{color:#f85149}
+table{width:100%;border-collapse:collapse}
+tr{border-bottom:1px solid #21262d}
+tr:last-child{border-bottom:none}
+th{text-align:left;padding:6px 12px;color:#8b949e;font-weight:400;white-space:nowrap;width:280px;border-right:1px solid #21262d}
+td{padding:6px 12px;font-family:'SF Mono','Consolas','Liberation Mono',monospace;word-break:break-all}
+.section-title{color:#58a6ff;font-size:13px;font-weight:600;margin-bottom:8px}
+.arr-items{margin:4px 0 4px 16px;font-size:12px;color:#8b949e}
+</style>
+</head>
+<body>
+<h1>p2put Dashboard</h1>
+<div class="tabs" id="tabs"></div>
+<div id="content"><div class="loading">Select a tab to load data</div></div>
+<script>
+const endpoints=['board','relays','dht','conns','peers'];
+const labels={board:'📊 Board',relays:'🔄 Relays',dht:'📁 DHT',conns:'🔗 Conns',peers:'👥 Peers'};
+let currentTab='';
+
+const tabsEl=document.getElementById('tabs');
+for(const ep of endpoints){
+	const btn=document.createElement('div');
+	btn.className='tab';
+	btn.dataset.name=ep;
+	btn.textContent=labels[ep];
+	btn.onclick=()=>switchTab(ep);
+	tabsEl.appendChild(btn);
+}
+
+function flatten(obj,prefix){
+	let rows=[];
+	for(const [key,val] of Object.entries(obj)){
+		const name=prefix?prefix+'.'+key:key;
+		if(val!==null && typeof val==='object'){
+			if(Array.isArray(val)){
+				rows.push({name,value:'Array('+val.length+')',extra:'<div class="arr-items">'+val.slice(0,999).map((v,i)=>'['+i+'] '+(typeof v==='object'?JSON.stringify(v):v)).join('<br>')+'</div>'});
+			}else{
+				rows.push(...flatten(val,name));
+			}
+		}else{
+			rows.push({name,value:val===null?'-':String(val),extra:''});
+		}
+	}
+	return rows;
+}
+
+function render(name,data){
+	const rows=flatten(data,'');
+	let html='<div class="section-title">'+labels[name]+'</div><table>';
+	for(const r of rows){
+		html+='<tr><th>'+r.name+'</th><td>'+r.value+' '+r.extra+'</td></tr>';
+	}
+	html+='</table>';
+	document.getElementById('content').innerHTML=html;
+}
+
+async function switchTab(name){
+	currentTab=name;
+	document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.name===name));
+	const c=document.getElementById('content');
+	c.innerHTML='<div class="loading">Loading '+labels[name]+'...</div>';
+	try{
+		const res=await fetch('/p2pin/'+name);
+		if(!res.ok) throw new Error('HTTP '+res.status);
+		const data=await res.json();
+		render(name,data);
+	}catch(e){
+		c.innerHTML='<div class="error">Error: '+e.message+'</div>';
+	}
+}
+
+switchTab('board');
+</script>
+</body>
+</html>

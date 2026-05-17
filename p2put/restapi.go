@@ -1,6 +1,7 @@
 package p2put
 
 import (
+	_ "embed"
 	"encoding/json"
 	"net/http"
 	"path/filepath"
@@ -19,6 +20,7 @@ func InstallRestHandler(path string, mux *http.ServeMux) {
 	myinstall("dht", onDHT)
 	myinstall("conns", onConns)
 	myinstall("peers", onPeers)
+	myinstall("index", onIndex)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -76,3 +78,12 @@ func onConns(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, resp)
 }
+
+func onIndex(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(indexHTML))
+}
+
+//go:embed index.html
+var indexHTML string
+
