@@ -63,7 +63,7 @@ func MainLibp2p() {
 
 
 const (
-	defaultListenPort = 9000
+	defaultListenPort = 4001
 	p2pServiceNode    = 1
 	p2pServiceChat    = 1 << 24
 
@@ -110,7 +110,6 @@ type Libp2pBsPeerInfo struct {
 type Libp2pBootConfig struct {
 	KeyFile    string
 	ListenPort int
-	Timeout    time.Duration
 }
 
 type Libp2pBootResult struct {
@@ -143,14 +142,12 @@ func mainLibp2p() {
 
 	fs := flag.NewFlagSet("libp2p", flag.ContinueOnError)
 	keyFile := fs.String("k", "key.txt", "keyring file")
-	port := fs.Int("l", defaultListenPort, "TCP listen port")
-	timeoutSec := fs.Int("t", 120, "bootstrap timeout (seconds)")
+	port := fs.Int("l", 0, "TCP listen port - 4001 or random")
 	fs.Parse(os.Args[1:])
 
 	cfg := Libp2pBootConfig{
 		KeyFile:    *keyFile,
 		ListenPort: *port,
-		Timeout:    time.Duration(*timeoutSec) * time.Second,
 	}
 
 	res, err := Libp2pBootstrap(context.Background(), cfg)
@@ -199,9 +196,6 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 	pubKey := edPriv.Public().(ed25519.PublicKey)
 	pubHex := hex.EncodeToString(pubKey)
 	fmt.Printf("    My pubkey: %s...\n\n", pubHex[:32])
-
-	bootCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
-	defer cancel()
 
 	libp2pPriv, err := crypto.UnmarshalEd25519PrivateKey(edPriv)
 	if err != nil {
@@ -264,6 +258,8 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 	fmt.Println("=== Phase 3: DHT Bootstrap ===")
 	fmt.Println("[*] Starting Kademlia DHT in client mode...")
 
+	bootCtx, cancel := context.WithTimeout(ctx, 123*time.Second)
+	defer cancel()
 	kadDHT, err := dht.New(bootCtx, h,
 		dht.Mode(dht.ModeClient),
 		dht.BootstrapPeers(bootstrapInfos...),
