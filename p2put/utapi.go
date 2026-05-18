@@ -3,6 +3,7 @@ package p2put
 import (
 	"context"
 	"fmt"
+	"log"
 	"reflect"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/multiformats/go-multiaddr"
 )
 
@@ -21,18 +23,22 @@ var bootres *Libp2pBootResult
 
 type Event struct {
 	Type  string
+	Topic string
 	Value any
 }
 
 var (
-	rawChan   chan any
-	clients   map[chan Event]struct{}
-	clientsMu sync.RWMutex
+	rawChan       chan any
+	clients       map[chan Event]struct{}
+	clientsMu     sync.RWMutex
+	clientTopics  map[chan Event][]string
+	topicSubs     sync.Map // map[string]*pubsub.Subscription
 )
 
 func init() {
 	rawChan = make(chan any, 100)
 	clients = make(map[chan Event]struct{})
+	clientTopics = make(map[chan Event][]string)
 	go broadcastLoop()
 }
 
@@ -52,6 +58,64 @@ func broadcastLoop() {
 		clientsMu.RUnlock()
 	}
 }//
+
+func hasTopic(topics []string, topic string) bool {
+	for _, t := range topics {
+		if t == topic {
+			return true
+		}
+	}
+	return false
+}
+
+func getOrSubscribeTopic(topic string) error {
+	if bootres == nil {
+		log.Printf("[pso] bootres is nil")
+		return fmt.Errorf("bootres nil")
+	}
+	if bootres.PSO == nil {
+		log.Printf("[pso] PSO is nil")
+		return fmt.Errorf("pso not ready")
+	}
+	for _, t := range bootres.PSO.GetTopics() {
+		if t == topic {
+			log.Printf("[pso] already subscribed: %s", topic)
+			return nil
+		}
+	}
+	log.Printf("[pso] subscribing to: %s", topic)
+	sub, err := bootres.PSO.Subscribe(topic)
+	if err != nil {
+		log.Printf("[pso] subscribe error: %v", err)
+		return err
+	}
+	topicSubs.Store(topic, sub)
+	go topicListener(sub, topic)
+	log.Printf("[pso] subscribed: %s, GetTopics now: %v", topic, bootres.PSO.GetTopics())
+	return nil
+}
+
+func topicListener(sub *pubsub.Subscription, topic string) {
+	ctx := context.Background()
+	for {
+		msg, err := sub.Next(ctx)
+		if err != nil {
+			topicSubs.Delete(topic)
+			return
+		}
+		evt := Event{Type: "pubsub", Topic: topic, Value: string(msg.Data)}
+		clientsMu.RLock()
+		for ch, topics := range clientTopics {
+			if hasTopic(topics, topic) {
+				select {
+				case ch <- evt:
+				default:
+				}
+			}
+		}
+		clientsMu.RUnlock()
+	}
+}
 
 type BoardResp struct {
 	PeerID    string         `json:"peer_id"`
@@ -106,6 +170,7 @@ type ConnResp struct {
 type DHTResp struct {
 	Size  int      `json:"size"`
 	Peers []string `json:"peers"`
+	Topics []string `json:"topics"`
 }
 
 
@@ -303,9 +368,14 @@ func CollectDHT() (DHTResp, error) {
 	for i, p := range peers {
 		strs[i] = p.String()
 	}
+
+	topics := bootres.PSO.GetTopics()
+	log.Println(topics)
+
 	return DHTResp{
 		Size:  rt.Size(),
 		Peers: strs,
+		Topics: topics,
 	}, nil
 }
 

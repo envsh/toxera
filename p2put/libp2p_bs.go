@@ -335,7 +335,7 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 
 	myEventSuber(h, new(event.EvtLocalReachabilityChanged),
 		new(event.EvtPeerConnectednessChanged))
-	pso, err := pubsub.NewGossipSub(bootCtx, h)
+	pso, err := pubsub.NewGossipSub(context.Background(), h)
 	if err != nil { log.Println(err) }
 
 	fmt.Println("=== Phase 4.5: Waiting for AutoNAT ===")

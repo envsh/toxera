@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -140,13 +141,29 @@ func onKV(w http.ResponseWriter, r *http.Request) {
 var indexHTML string
 
 func onEvents(w http.ResponseWriter, r *http.Request) {
+	topicStr := r.URL.Query().Get("topic")
+	var topics []string
+	if topicStr != "" {
+		for _, t := range strings.Split(topicStr, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				topics = append(topics, t)
+				go getOrSubscribeTopic(t)
+			}
+		}
+	}
+
 	ch := make(chan Event, 20)
 	clientsMu.Lock()
 	clients[ch] = struct{}{}
+	if len(topics) > 0 {
+		clientTopics[ch] = topics
+	}
 	clientsMu.Unlock()
 	defer func() {
 		clientsMu.Lock()
 		delete(clients, ch)
+		delete(clientTopics, ch)
 		clientsMu.Unlock()
 		close(ch)
 	}()
