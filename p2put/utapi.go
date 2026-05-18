@@ -117,6 +117,18 @@ func topicListener(sub *pubsub.Subscription, topic string) {
 	}
 }
 
+const maxPublishSize = 1 << 20 // 1MB, matches DefaultMaxMessageSize
+
+func PublishTopic(topic string, data []byte) error {
+	if bootres == nil || bootres.PSO == nil {
+		return fmt.Errorf("pso not ready")
+	}
+	if len(data) > maxPublishSize {
+		return fmt.Errorf("payload too large: %d bytes, max %d", len(data), maxPublishSize)
+	}
+	return bootres.PSO.Publish(topic, data)
+}
+
 type BoardResp struct {
 	PeerID    string         `json:"peer_id"`
 	Pubkey    string         `json:"pubkey"`

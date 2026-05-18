@@ -26,6 +26,7 @@ func InstallRestHandler(path string, mux *http.ServeMux) {
 	myinstall("kv", onKV)
 	myinstall("index", onIndex)
 	myinstall("events", onEvents)
+	myinstall("send", onSend)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -204,5 +205,27 @@ output:
 		json.NewEncoder(w).Encode(map[string]string{"event": "timeout"})
 	case <-r.Context().Done():
 	}
+}
+
+func onSend(w http.ResponseWriter, r *http.Request) {
+	topic := r.URL.Query().Get("topic")
+	if topic == "" {
+		writeErr(w, http.StatusBadRequest, "missing topic")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+	data, err := io.ReadAll(io.LimitReader(r.Body, int64(maxPublishSize)+1))
+	if err != nil {
+		writeErr(w, http.StatusRequestEntityTooLarge, "payload too large")
+		return
+	}
+	if err := PublishTopic(topic, data); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]bool{"ok": true})
 }
 
