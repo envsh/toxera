@@ -6,15 +6,14 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net"
 	"os"
 	"log"
-	// "sync"
+	"strings"
 	"time"
-	// "strings"
-	// "reflect"
 
 	"github.com/envsh/toxera/fedkey"
 	"github.com/libp2p/go-libp2p"
@@ -31,7 +30,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	discovery "github.com/libp2p/go-libp2p/p2p/discovery/util"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
-	// madns "github.com/multiformats/go-multiaddr-dns"
+	"github.com/libp2p/go-libp2p-pubsub"
 	"github.com/multiformats/go-multiaddr"
 )
 
@@ -115,6 +114,7 @@ type Libp2pBootConfig struct {
 type Libp2pBootResult struct {
 	Host          host.Host
 	DHT           *dht.IpfsDHT
+	PSO           *pubsub.PubSub
 	Bwc           metrics.Reporter
 	PeerID        peer.ID
 	PubkeyHex     string
@@ -123,11 +123,59 @@ type Libp2pBootResult struct {
 	NATStatus        network.Reachability
 }
 
+// 缓存文件格式: map[string][]string (原始地址 → 解析后的地址列表)
+var dnsaddrsResultFile = "/tmp/libp2p_bootstrap_dnsaddrs.json"
+var dnsaddrsCacheDur = 2*3600*time.Second
+
+func loadOrResolveAllDNSAddrs() {
+	if data, err := os.ReadFile(dnsaddrsResultFile); err == nil {
+		var info os.FileInfo
+		info, err = os.Stat(dnsaddrsResultFile)
+		if err == nil && time.Since(info.ModTime()) < dnsaddrsCacheDur {
+			var resolved map[string][]string
+			if err = json.Unmarshal(data, &resolved); err == nil {
+				for _, addrs := range resolved {
+					for _, addr := range addrs {
+						if strings.Contains(addr, ":") ||
+							strings.Contains(addr, "/udp/") || strings.Contains(addr, "/wss/") {
+							continue
+						}
+						if !containsAddr(extraStaticRelays, addr) {
+							extraStaticRelays = append(extraStaticRelays, addr)
+						}
+					}
+				}
+				return
+			}
+		}
+	}
+
+	ctx := context.Background()
+	resolved := resolveAllDNSAddrsQuiet(ctx, libp2pBootstrap)
+
+	if data, err := json.Marshal(resolved); err == nil {
+		err = os.WriteFile(dnsaddrsResultFile, data, 0644)
+		if err != nil { panic(err) }
+	}
+
+	for _, addrs := range resolved {
+		for _, addr := range addrs {
+			if strings.Contains(addr, ":") ||
+				strings.Contains(addr, "/udp/") || strings.Contains(addr, "/wss/") {
+				continue
+			}
+			if !containsAddr(extraStaticRelays, addr) {
+				extraStaticRelays = append(extraStaticRelays, addr)
+			}
+		}
+	}
+}
 
 func mainLibp2p() {
 	fmt.Println("=== DNSADDR 解析结果汇总 ===")
 	fmt.Printf("[*] 原始 bootstrap 地址: %d 个\n", len(libp2pBootstrap))
-	resolveAllDNSAddrsInit()
+	// resolveAllDNSAddrsInit()
+	loadOrResolveAllDNSAddrs()
 	fmt.Printf("[*] 解析后的额外地址: %d 个\n", len(extraStaticRelays))
 	fmt.Printf("[*] 总候选地址: %d 个\n", len(allStaticRelays))
 	fmt.Println()
@@ -287,6 +335,8 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 
 	myEventSuber(h, new(event.EvtLocalReachabilityChanged),
 		new(event.EvtPeerConnectednessChanged))
+	pso, err := pubsub.NewGossipSub(bootCtx, h)
+	if err != nil { log.Println(err) }
 
 	fmt.Println("=== Phase 4.5: Waiting for AutoNAT ===")
 
@@ -294,6 +344,7 @@ func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResu
 	return &Libp2pBootResult{
 		Host:         h,
 		DHT:          kadDHT,
+		PSO:          pso,
 		Bwc:          bwc,
 		PeerID:       myID,
 		PubkeyHex:    pubHex,

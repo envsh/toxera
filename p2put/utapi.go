@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	// "sync"
+//	"encoding/json"
 
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	// "github.com/libp2p/go-libp2p-record"
@@ -16,6 +18,8 @@ import (
 )
 
 var bootres *Libp2pBootResult
+
+////////////////
 
 type BoardResp struct {
 	PeerID    string         `json:"peer_id"`
