@@ -377,17 +377,12 @@ func myEventSuber(h host.Host, evts ...any) {
 	go func() {
 		for evt := range sub.Out() {
 			log.Printf("<< %+v %v\n", evt, "") // reflect.TypeOf(evt)
+			rawChan <- evt
+
 			switch e := evt.(type) {
 			case event.EvtLocalReachabilityChanged:
-				// evt.Reachability: network.Reachability
-				switch e.Reachability {
-				case network.ReachabilityPublic:   // 公网可达
-				case network.ReachabilityPrivate:  // NAT 后面
-				case network.ReachabilityUnknown:  // 未知（探测中）
-				}
 				bootres.NATStatus = e.Reachability
 			case event.EvtPeerConnectednessChanged:
-
 			}
 		}
 	}()

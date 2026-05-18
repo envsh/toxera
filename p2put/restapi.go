@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"time"
 )
 
 func InstallRestHandler(path string, mux *http.ServeMux) {
@@ -23,6 +24,7 @@ func InstallRestHandler(path string, mux *http.ServeMux) {
 	myinstall("peers", onPeers)
 	myinstall("kv", onKV)
 	myinstall("index", onIndex)
+	myinstall("events", onEvents)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -136,4 +138,54 @@ func onKV(w http.ResponseWriter, r *http.Request) {
 
 //go:embed index.html
 var indexHTML string
+
+func onEvents(w http.ResponseWriter, r *http.Request) {
+	ch := make(chan Event, 20)
+	clientsMu.Lock()
+	clients[ch] = struct{}{}
+	clientsMu.Unlock()
+	defer func() {
+		clientsMu.Lock()
+		delete(clients, ch)
+		clientsMu.Unlock()
+		close(ch)
+	}()
+
+	var events []Event
+	collectDeadline := time.Now().Add(60 * time.Millisecond)
+
+	for len(events) < 20 {
+		remaining := collectDeadline.Sub(time.Now())
+		if remaining <= 0 {
+			break
+		}
+		select {
+		case evt := <-ch:
+			events = append(events, evt)
+		case <-time.After(remaining):
+			goto output
+		case <-r.Context().Done():
+			return
+		}
+	}
+
+output:
+	if len(events) > 0 {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		for _, e := range events {
+			json.NewEncoder(w).Encode(e)
+		}
+		return
+	}
+
+	select {
+	case evt := <-ch:
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		json.NewEncoder(w).Encode(evt)
+	case <-time.After(30 * time.Second):
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		json.NewEncoder(w).Encode(map[string]string{"event": "timeout"})
+	case <-r.Context().Done():
+	}
+}
 

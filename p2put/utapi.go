@@ -3,23 +3,55 @@ package p2put
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
+	"sync"
 	"time"
-	// "sync"
-//	"encoding/json"
 
 	dht "github.com/libp2p/go-libp2p-kad-dht"
-	// "github.com/libp2p/go-libp2p-record"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/multiformats/go-multiaddr"
-	// "github.com/multiformats/go-multihash"
 )
 
 var bootres *Libp2pBootResult
 
-////////////////
+//////////////
+
+type Event struct {
+	Type  string
+	Value any
+}
+
+var (
+	rawChan   chan any
+	clients   map[chan Event]struct{}
+	clientsMu sync.RWMutex
+)
+
+func init() {
+	rawChan = make(chan any, 100)
+	clients = make(map[chan Event]struct{})
+	go broadcastLoop()
+}
+
+func broadcastLoop() {
+	for raw := range rawChan {
+		evt := Event{
+			Type:  reflect.TypeOf(raw).String(),
+			Value: raw,
+		}
+		clientsMu.RLock()
+		for ch := range clients {
+			select {
+			case ch <- evt:
+			default:
+			}
+		}
+		clientsMu.RUnlock()
+	}
+}//
 
 type BoardResp struct {
 	PeerID    string         `json:"peer_id"`
