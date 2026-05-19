@@ -1,11 +1,30 @@
 package p2put
 
 import (
+	"flag"
+
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
+func getFlagSet(cfg *Config) *flag.FlagSet {
+	fs := flag.NewFlagSet("libp2p", flag.ContinueOnError)
+	keyFile := fs.String("k", "key.txt", "keyring file")
+	port := fs.Int("l", 0, "TCP listen port - 4001 or random")
+	_ , _  = keyFile, port
+	cfg._KeyFile = keyFile
+	cfg._ListenPort = port
+	return fs
+}
+
 type Config struct {
+	Fset *flag.FlagSet // caller parser
+	_KeyFile *string
+	_ListenPort *int
+
+	KeyFile    string // fedkey seed file
+	ListenPort int
+
 	Server bool
 	Dht   bool
 	ResRate float32 // 0.5, 1, 2
@@ -16,7 +35,6 @@ type Config struct {
 	Wss   bool
 	Quic  bool
 	Bw   bool
-	Port int
 	Punching bool
 	AutoPing bool
 }
@@ -31,7 +49,10 @@ var dftConfig = Config{
 }
 var currConfig = dftConfig
 
-func DefaultConfig() Config { return dftConfig }
+func DefaultConfig() Config {
+	dftConfig.Fset = getFlagSet(&dftConfig)
+	return dftConfig
+}
 
 /////
 // usage: libp2p.New(libp2p.ResourceManager(myResourcemanager()),

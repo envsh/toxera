@@ -7,7 +7,7 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
-	"flag"
+	// "flag"
 	"fmt"
 	"net"
 	"os"
@@ -54,8 +54,8 @@ func (o *Libp2p) Info() string {
 	return "{}"
 }
 
-func MainLibp2p() {
-	mainLibp2p()
+func MainLibp2p(cfg Config) {
+	mainLibp2p(cfg)
 }
 
 //////
@@ -104,11 +104,6 @@ type Libp2pBsPeerInfo struct {
 	PeerID        peer.ID
 	Conn          network.Conn
 	SupportsRelay bool
-}
-
-type Libp2pBootConfig struct {
-	KeyFile    string
-	ListenPort int
 }
 
 type Libp2pBootResult struct {
@@ -171,7 +166,7 @@ func loadOrResolveAllDNSAddrs() {
 	}
 }
 
-func mainLibp2p() {
+func mainLibp2p(cfg Config) {
 	fmt.Println("=== DNSADDR 解析结果汇总 ===")
 	fmt.Printf("[*] 原始 bootstrap 地址: %d 个\n", len(libp2pBootstrap))
 	// resolveAllDNSAddrsInit()
@@ -188,15 +183,20 @@ func mainLibp2p() {
 	}
 	fmt.Println()
 
-	fs := flag.NewFlagSet("libp2p", flag.ContinueOnError)
-	keyFile := fs.String("k", "key.txt", "keyring file")
-	port := fs.Int("l", 0, "TCP listen port - 4001 or random")
-	fs.Parse(os.Args[1:])
+	// fs := flag.NewFlagSet("libp2p", flag.ContinueOnError)
+	// keyFile := fs.String("k", "key.txt", "keyring file")
+	// port := fs.Int("l", 0, "TCP listen port - 4001 or random")
+	// fs.Parse(os.Args[1:])
 
-	cfg := Libp2pBootConfig{
-		KeyFile:    *keyFile,
-		ListenPort: *port,
-	}
+	// cfg := Libp2pBootConfig{
+	// 	KeyFile:    *keyFile,
+	// 	ListenPort: *port,
+	// }
+
+	log.Println(*cfg._KeyFile)
+	log.Println(*cfg._ListenPort)
+	cfg.KeyFile = *cfg._KeyFile
+	cfg.ListenPort = *cfg._ListenPort
 
 	res, err := Libp2pBootstrap(context.Background(), cfg)
 	if err != nil {
@@ -230,7 +230,7 @@ func filterConvertBootstrapInfos() []peer.AddrInfo {
 	return bootstrapInfos
 }
 
-func Libp2pBootstrap(ctx context.Context, cfg Libp2pBootConfig) (*Libp2pBootResult, error) {
+func Libp2pBootstrap(ctx context.Context, cfg Config) (*Libp2pBootResult, error) {
 	start := time.Now()
 
 	fmt.Println("=== Phase 1: Key Loading ===")
