@@ -2,9 +2,12 @@ package p2put
 
 import (
 	"flag"
+	"time"
 
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p-pubsub"
+
 )
 
 func getFlagSet(cfg *Config) *flag.FlagSet {
@@ -61,17 +64,33 @@ func DefaultConfig() Config {
 // usage: libp2p.New(libp2p.ResourceManager(myResourcemanager()),
 func myResourceManager() network.ResourceManager {
 	limits := rcmgr.DefaultLimits
+	syslmt := limits.SystemBaseLimit
+	const rate = 1
 	limits.SystemBaseLimit = rcmgr.BaseLimit{
-		Conns: 32/2,
-		ConnsInbound: 16/2,
-		ConnsOutbound: 16/2,
-		Streams: 64/2,
-		StreamsInbound: 32/2,
-		StreamsOutbound: 32/2,
-		FD: 32/2,
-		Memory: (128 << 20)/2,
+		Conns: (syslmt.Conns/4)*rate,
+		ConnsInbound: (syslmt.ConnsInbound/4)*rate,
+		ConnsOutbound: (syslmt.ConnsOutbound/4)*rate,
+		Streams: (syslmt.Streams/4)*rate,
+		StreamsInbound: (syslmt.StreamsInbound/4)*rate,
+		StreamsOutbound: (syslmt.StreamsOutbound/4)*rate,
+		FD: (syslmt.FD/4)*rate,
+		Memory: (syslmt.Memory/4)*int64(rate),
 	}
 	rm, _ := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(limits.Scale(0, 0)))
 
 	return rm
+}
+
+func myGossipSubParams() pubsub.GossipSubParams {
+	dft := pubsub.DefaultGossipSubParams()
+	dft.D =                 3
+	dft.Dlo =                 2
+	dft.Dhi =                 6
+	dft.Dlazy =               3
+	dft.GossipFactor =        0.1
+	dft.HeartbeatInterval =   2 * time.Second
+	dft.HistoryLength =       5
+	dft.HistoryGossip =       3
+	dft.DirectConnectTicks =  600  // ← 必须，否则除以零
+	return dft
 }

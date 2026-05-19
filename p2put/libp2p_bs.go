@@ -114,8 +114,8 @@ type Libp2pBootResult struct {
 	PeerID        peer.ID
 	PubkeyHex     string
 	BootTime      time.Duration
-
-	NATStatus        network.Reachability
+	NATStatus     network.Reachability
+	Discovery     *routing.RoutingDiscovery
 }
 
 // 缓存文件格式: map[string][]string (原始地址 → 解析后的地址列表)
@@ -208,6 +208,41 @@ func mainLibp2p(cfg Config) {
 	myDumpBoot(res.Host, res.DHT)
 	bootres = res
 
+	go func() {
+		rd := bootres.Discovery
+		for {
+			var tags []string
+			discoveryTags.Range(func(key, _ any) bool {
+				tags = append(tags, key.(string))
+				return true
+			})
+			for _, tag := range tags {
+				findCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				peerChan, err := rd.FindPeers(findCtx, tag)
+				if err != nil {
+					cancel()
+					continue
+				}
+				for p := range peerChan {
+					if p.ID == bootres.Host.ID() || p.ID == "" {
+						continue
+					}
+					if bootres.Host.Network().Connectedness(p.ID) != network.Connected {
+						dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
+						if err := bootres.Host.Connect(dialCtx, p); err != nil {
+							log.Printf("[discovery] connect %s: %v", p.ID.ShortString(), err)
+						} else {
+							log.Printf("[discovery] connected to %s", p.ID.ShortString())
+						}
+						dialCancel()
+					}
+				}
+				cancel()
+			}
+			time.Sleep(20 * time.Second)
+		}
+	}()
+
 	select {}
 }
 
@@ -268,18 +303,58 @@ func Libp2pBootstrap(ctx context.Context, cfg Config) (*Libp2pBootResult, error)
 
 		libp2p.EnableRelay(),
 
+		/*
+		libp2p.EnableAutoRelay(
+			autorelay.WithNumRelays(3),
+			autorelay.WithMinCandidates(3),
+			autorelay.WithBootDelay(30*time.Second),
+		),
+		*/
+
 		libp2p.EnableAutoRelayWithStaticRelays(
+			dht.GetDefaultBootstrapPeerAddrInfos(),
+			autorelay.WithNumRelays(5),
+			autorelay.WithMinCandidates(5),
+			autorelay.WithBootDelay(30*time.Second),
+		),
+
+		// static relay seems fixed relay, not auto find more relays
+		/*libp2p.EnableAutoRelayWithStaticRelays(
 			staticRelays,
 			autorelay.WithNumRelays(5),
 			autorelay.WithMinCandidates(5),
 			autorelay.WithBootDelay(60*time.Second),
 		),
+		*/
 
 		libp2p.EnableHolePunching(),
 		libp2p.Transport(tcp.NewTCPTransport),
 		libp2p.UserAgent("universal-connectivity/go-peer"),
 
 		libp2p.BandwidthReporter(bwc),
+
+		libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
+			var out []multiaddr.Multiaddr
+			for _, a := range addrs {
+				if isRelayAddr(a) {
+					out = append(out, a)
+				} else {
+					ip4 := false
+					tcp := false
+					for _, p := range a.Protocols() {
+						if p.Code == multiaddr.P_IP4 { ip4 = true }
+						if p.Code == multiaddr.P_TCP { tcp = true }
+					}
+					if ip4 && tcp {
+						out = append(out, a)
+					}
+				}
+			}
+			if len(addrs) != len(out) {
+				log.Println("addrs filter", len(addrs), "=>", len(out))
+			}
+			return out
+		}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create libp2p host: %w", err)
@@ -337,20 +412,43 @@ func Libp2pBootstrap(ctx context.Context, cfg Config) (*Libp2pBootResult, error)
 
 	myEventSuber(h, new(event.EvtLocalReachabilityChanged),
 		new(event.EvtPeerConnectednessChanged))
-	pso, err := pubsub.NewGossipSub(context.Background(), h)
+	pso, err := pubsub.NewGossipSub(context.Background(), h,
+		// half default
+		pubsub.WithGossipSubParams(myGossipSubParams()),
+		pubsub.WithPeerScore(
+			&pubsub.PeerScoreParams{
+				SkipAtomicValidation: true,
+				AppSpecificScore:     func(peer.ID) float64 { return 0 },
+				DecayInterval:        time.Second,
+				DecayToZero:          0.01,
+			},
+			&pubsub.PeerScoreThresholds{
+				SkipAtomicValidation: true,
+			},
+		),
+		pubsub.WithPeerScoreInspect(
+			func(scores map[peer.ID]float64) {
+				for pid, s := range scores {
+					log.Printf("[score] %s: %.2f", pid.ShortString(), s)
+				}
+			},
+			10*time.Second,
+		),
+	)
 	if err != nil { log.Println(err) }
 
 	fmt.Println("=== Phase 4.5: Waiting for AutoNAT ===")
 
 	log.Println("bootstrap ret...")
 	return &Libp2pBootResult{
-		Host:         h,
-		DHT:          kadDHT,
-		PSO:          pso,
-		Bwc:          bwc,
-		PeerID:       myID,
-		PubkeyHex:    pubHex,
-		BootTime:     time.Since(start),
+		Host:      h,
+		DHT:       kadDHT,
+		PSO:       pso,
+		Bwc:       bwc,
+		PeerID:    myID,
+		PubkeyHex: pubHex,
+		BootTime:  time.Since(start),
+		Discovery: routingDiscovery,
 	}, nil
 }
 

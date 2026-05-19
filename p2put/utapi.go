@@ -32,7 +32,8 @@ var (
 	clients       map[chan Event]struct{}
 	clientsMu     sync.RWMutex
 	clientTopics  map[chan Event][]string
-	topicSubs     sync.Map // map[string]*pubsub.Subscription
+	topicSubs     sync.Map // map[string]*pubsub.Topic
+	discoveryTags sync.Map // set[string]
 )
 
 func init() {
@@ -40,6 +41,15 @@ func init() {
 	clients = make(map[chan Event]struct{})
 	clientTopics = make(map[chan Event][]string)
 	go broadcastLoop()
+	discoveryTags.Store("libp2p-bootstrap-test", struct{}{})
+}
+
+func AddDiscoveryTag(tag string) {
+	discoveryTags.Store(tag, struct{}{})
+}
+
+func RemoveDiscoveryTag(tag string) {
+	discoveryTags.Delete(tag)
 }
 
 func broadcastLoop() {
@@ -68,31 +78,31 @@ func hasTopic(topics []string, topic string) bool {
 	return false
 }
 
-func getOrSubscribeTopic(topic string) error {
-	if bootres == nil {
-		log.Printf("[pso] bootres is nil")
-		return fmt.Errorf("bootres nil")
+func getOrSubscribeTopic(topic string) (*pubsub.Topic, error) {
+	if bootres == nil || bootres.PSO == nil {
+		return nil, fmt.Errorf("pso not ready")
 	}
-	if bootres.PSO == nil {
-		log.Printf("[pso] PSO is nil")
-		return fmt.Errorf("pso not ready")
+	if val, ok := topicSubs.Load(topic); ok {
+		return val.(*pubsub.Topic), nil
 	}
-	for _, t := range bootres.PSO.GetTopics() {
-		if t == topic {
-			log.Printf("[pso] already subscribed: %s", topic)
-			return nil
-		}
-	}
-	log.Printf("[pso] subscribing to: %s", topic)
-	sub, err := bootres.PSO.Subscribe(topic)
+
+	t, err := bootres.PSO.Join(topic)
 	if err != nil {
-		log.Printf("[pso] subscribe error: %v", err)
-		return err
+		if val, ok := topicSubs.Load(topic); ok {
+			return val.(*pubsub.Topic), nil
+		}
+		return nil, err
 	}
-	topicSubs.Store(topic, sub)
+
+	topicSubs.Store(topic, t)
+
+	sub, err := t.Subscribe()
+	if err != nil {
+		topicSubs.Delete(topic)
+		return nil, err
+	}
 	go topicListener(sub, topic)
-	log.Printf("[pso] subscribed: %s, GetTopics now: %v", topic, bootres.PSO.GetTopics())
-	return nil
+	return t, nil
 }
 
 func topicListener(sub *pubsub.Subscription, topic string) {
@@ -100,10 +110,11 @@ func topicListener(sub *pubsub.Subscription, topic string) {
 	for {
 		msg, err := sub.Next(ctx)
 		if err != nil {
-			topicSubs.Delete(topic)
 			return
 		}
-		evt := Event{Type: "pubsub", Topic: topic, Value: string(msg.Data)}
+		isme := msg.ReceivedFrom == bootres.PeerID
+		log.Println("<< submsg", isme, msg.ReceivedFrom.ShortString(), topic, len(msg.Data), string(msg.Data))
+		evt := Event{Type: "pubsub", Topic: topic, Value: msg}
 		clientsMu.RLock()
 		for ch, topics := range clientTopics {
 			if hasTopic(topics, topic) {
@@ -127,21 +138,29 @@ func UnsubscribeTopic(topic string) error {
 	if !ok {
 		return fmt.Errorf("topic %s not subscribed", topic)
 	}
-	sub := val.(*pubsub.Subscription)
-	sub.Cancel()
+	t := val.(*pubsub.Topic)
+	if err := t.Close(); err != nil {
+		return err
+	}
 	topicSubs.Delete(topic)
 	log.Printf("[pso] unsubscribed: %s", topic)
 	return nil
 }
 
 func PublishTopic(topic string, data []byte) error {
-	if bootres == nil || bootres.PSO == nil {
-		return fmt.Errorf("pso not ready")
+	t, err := getOrSubscribeTopic(topic)
+	if err != nil {
+		return err
 	}
+	log.Printf("[pso] subscribe topic=%q, peers=%d", topic, len(bootres.PSO.ListPeers(topic)))
 	if len(data) > maxPublishSize {
 		return fmt.Errorf("payload too large: %d bytes, max %d", len(data), maxPublishSize)
 	}
-	return bootres.PSO.Publish(topic, data)
+	err = t.Publish(context.Background(), data)
+	if err == nil && len(bootres.PSO.ListPeers(topic)) == 0 {
+		return fmt.Errorf("zero pso.ListPeers for %v", topic)
+	}
+	return err
 }
 
 type BoardResp struct {
