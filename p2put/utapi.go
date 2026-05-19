@@ -119,6 +119,21 @@ func topicListener(sub *pubsub.Subscription, topic string) {
 
 const maxPublishSize = 1 << 20 // 1MB, matches DefaultMaxMessageSize
 
+func UnsubscribeTopic(topic string) error {
+	if bootres == nil || bootres.PSO == nil {
+		return fmt.Errorf("pso not ready")
+	}
+	val, ok := topicSubs.Load(topic)
+	if !ok {
+		return fmt.Errorf("topic %s not subscribed", topic)
+	}
+	sub := val.(*pubsub.Subscription)
+	sub.Cancel()
+	topicSubs.Delete(topic)
+	log.Printf("[pso] unsubscribed: %s", topic)
+	return nil
+}
+
 func PublishTopic(topic string, data []byte) error {
 	if bootres == nil || bootres.PSO == nil {
 		return fmt.Errorf("pso not ready")

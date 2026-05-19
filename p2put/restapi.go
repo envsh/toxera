@@ -27,6 +27,7 @@ func InstallRestHandler(path string, mux *http.ServeMux) {
 	myinstall("index", onIndex)
 	myinstall("events", onEvents)
 	myinstall("send", onSend)
+	myinstall("unsub", onUnsub)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -224,6 +225,19 @@ func onSend(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := PublishTopic(topic, data); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]bool{"ok": true})
+}
+
+func onUnsub(w http.ResponseWriter, r *http.Request) {
+	topic := r.URL.Query().Get("topic")
+	if topic == "" {
+		writeErr(w, http.StatusBadRequest, "missing topic")
+		return
+	}
+	if err := UnsubscribeTopic(topic); err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
 		return
 	}
 	writeJSON(w, map[string]bool{"ok": true})
