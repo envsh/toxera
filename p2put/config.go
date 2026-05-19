@@ -18,10 +18,12 @@ func getFlagSet(cfg *Config) *flag.FlagSet {
 }
 
 type Config struct {
+	// usage1, just Fset.parse()
 	Fset *flag.FlagSet // caller parser
 	_KeyFile *string
 	_ListenPort *int
 
+	// usage2, assign direct, without Fset.parse
 	KeyFile    string // fedkey seed file
 	ListenPort int
 
@@ -40,6 +42,7 @@ type Config struct {
 }
 
 var dftConfig = Config{
+	KeyFile: "key.txt",
 	Dht: true,
 	ResRate: 0.2,
 	Relay: true,

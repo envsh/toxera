@@ -193,10 +193,12 @@ func mainLibp2p(cfg Config) {
 	// 	ListenPort: *port,
 	// }
 
-	log.Println(*cfg._KeyFile)
-	log.Println(*cfg._ListenPort)
-	cfg.KeyFile = *cfg._KeyFile
-	cfg.ListenPort = *cfg._ListenPort
+	if cfg.Fset.Parsed() {
+		log.Println(*cfg._KeyFile)
+		log.Println(*cfg._ListenPort)
+		cfg.KeyFile = *cfg._KeyFile
+		cfg.ListenPort = *cfg._ListenPort
+	}
 
 	res, err := Libp2pBootstrap(context.Background(), cfg)
 	if err != nil {
