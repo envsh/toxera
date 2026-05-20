@@ -208,40 +208,7 @@ func mainLibp2p(cfg Config) {
 	myDumpBoot(res.Host, res.DHT)
 	bootres = res
 
-	go func() {
-		rd := bootres.Discovery
-		for {
-			var tags []string
-			discoveryTags.Range(func(key, _ any) bool {
-				tags = append(tags, key.(string))
-				return true
-			})
-			for _, tag := range tags {
-				findCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-				peerChan, err := rd.FindPeers(findCtx, tag)
-				if err != nil {
-					cancel()
-					continue
-				}
-				for p := range peerChan {
-					if p.ID == bootres.Host.ID() || p.ID == "" {
-						continue
-					}
-					if bootres.Host.Network().Connectedness(p.ID) != network.Connected {
-						dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
-						if err := bootres.Host.Connect(dialCtx, p); err != nil {
-							log.Printf("[discovery] connect %s: %v", p.ID.ShortString(), err)
-						} else {
-							log.Printf("[discovery] connected to %s", p.ID.ShortString())
-						}
-						dialCancel()
-					}
-				}
-				cancel()
-			}
-			time.Sleep(20 * time.Second)
-		}
-	}()
+	go myDiscoveryV2()
 
 	select {}
 }
@@ -450,6 +417,41 @@ func Libp2pBootstrap(ctx context.Context, cfg Config) (*Libp2pBootResult, error)
 		BootTime:  time.Since(start),
 		Discovery: routingDiscovery,
 	}, nil
+}
+
+func myDiscoveryV2() {
+	rd := bootres.Discovery
+	for {
+		var tags []string
+		discoveryTags.Range(func(key, _ any) bool {
+			tags = append(tags, key.(string))
+			return true
+		})
+		for _, tag := range tags {
+			findCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			peerChan, err := rd.FindPeers(findCtx, tag)
+			if err != nil {
+				cancel()
+				continue
+			}
+			for p := range peerChan {
+				if p.ID == bootres.Host.ID() || p.ID == "" {
+					continue
+				}
+				if bootres.Host.Network().Connectedness(p.ID) != network.Connected {
+					dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
+					if err := bootres.Host.Connect(dialCtx, p); err != nil {
+						log.Printf("[discovery] connect %s: %v", p.ID.ShortString(), err)
+					} else {
+						log.Printf("[discovery] connected to %s", p.ID.ShortString())
+					}
+					dialCancel()
+				}
+			}
+			cancel()
+		}
+		time.Sleep(20 * time.Second)
+	}
 }
 
 func myDiscoveryV1 (bootCtx context.Context, routingDiscovery *routing.RoutingDiscovery, testCID string, myID peer.ID) (discoveredSet map[peer.ID]struct{}) {
