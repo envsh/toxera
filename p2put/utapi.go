@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -222,6 +223,12 @@ type DHTResp struct {
 type StorePeerEntry struct {
 	PeerID string   `json:"peer_id"`
 	Addrs  []string `json:"addrs"`
+}
+
+type TopicEntry struct {
+	Topic      string `json:"topic"`
+	Subscribed bool   `json:"subscribed"`
+	IsTag      bool   `json:"is_tag"`
 }
 
 type NoopValidator struct {}
@@ -514,5 +521,39 @@ func CollectStorePeers() []StorePeerEntry {
 	if out == nil {
 		out = []StorePeerEntry{}
 	}
+	return out
+}
+
+func CollectTopics() []TopicEntry {
+	if bootres == nil || bootres.Host == nil || bootres.PSO == nil {
+		return []TopicEntry{}
+	}
+	seen := make(map[string]*TopicEntry)
+	for _, t := range bootres.PSO.GetTopics() {
+		seen[t] = &TopicEntry{Topic: t}
+	}
+	topicSubs.Range(func(key, _ any) bool {
+		t := key.(string)
+		if _, ok := seen[t]; !ok {
+			seen[t] = &TopicEntry{Topic: t}
+		}
+		seen[t].Subscribed = true
+		return true
+	})
+	discoveryTags.Range(func(key, _ any) bool {
+		t := key.(string)
+		if _, ok := seen[t]; !ok {
+			seen[t] = &TopicEntry{Topic: t}
+		}
+		seen[t].IsTag = true
+		return true
+	})
+	out := make([]TopicEntry, 0, len(seen))
+	for _, v := range seen {
+		out = append(out, *v)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Topic < out[j].Topic
+	})
 	return out
 }

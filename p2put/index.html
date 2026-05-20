@@ -35,8 +35,8 @@ td{padding:6px 12px;font-family:'SF Mono','Consolas','Liberation Mono',monospace
 <div class="tabs" id="tabs"></div>
 <div id="content"><div class="loading">Select a tab to load data</div></div>
 <script>
-const endpoints=['board','relays','dht','conns','peers','store_peers','stable_peers'];
-const labels={board:'📊 Board',relays:'🔄 Relays',dht:'📁 DHT',conns:'🔗 Connections',peers:'👥 Peers',store_peers:'💾 Store Peers',stable_peers:'⭐ Stable Peers'};
+const endpoints=['board','relays','dht','conns','peers','store_peers','stable_peers','topics'];
+const labels={board:'📊 Board',relays:'🔄 Relays',dht:'📁 DHT',conns:'🔗 Connections',peers:'👥 Peers',store_peers:'💾 Store Peers',stable_peers:'⭐ Stable Peers',topics:'📋 Topics'};
 let currentTab='';
 
 const tabsEl=document.getElementById('tabs');
@@ -72,7 +72,7 @@ function snakeToTitle(s){
 
 function render(name,data){
 	if(Array.isArray(data) && data.length>0 && typeof data[0]==='object'){
-		let html='<div class="section-title">'+labels[name]+'</div>';
+		let html='<div class="section-title">'+labels[name]+' ('+data.length+')</div>';
 		for(const row of data){
 			const cols=Object.keys(row);
 			html+='<div class="peer-block"><table>';
