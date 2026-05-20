@@ -32,6 +32,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/metrics"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
+	"github.com/libp2p/go-libp2p/p2p/transport/websocket"
 	discovery "github.com/libp2p/go-libp2p/p2p/discovery/util"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-pubsub"
@@ -139,7 +140,7 @@ func loadOrResolveAllDNSAddrs() {
 				for _, addrs := range resolved {
 					for _, addr := range addrs {
 						if strings.Contains(addr, ":") ||
-							strings.Contains(addr, "/udp/") || strings.Contains(addr, "/wss/") {
+							strings.Contains(addr, "/udp/") {
 							continue
 						}
 						if !containsAddr(extraStaticRelays, addr) {
@@ -163,7 +164,7 @@ func loadOrResolveAllDNSAddrs() {
 	for _, addrs := range resolved {
 		for _, addr := range addrs {
 			if strings.Contains(addr, ":") ||
-				strings.Contains(addr, "/udp/") || strings.Contains(addr, "/wss/") {
+				strings.Contains(addr, "/udp/") {
 				continue
 			}
 			if !containsAddr(extraStaticRelays, addr) {
@@ -315,6 +316,7 @@ func Libp2pBootstrap(ctx context.Context, cfg Config) (*Libp2pBootResult, error)
 
 		libp2p.EnableHolePunching(),
 		libp2p.Transport(tcp.NewTCPTransport),
+		libp2p.Transport(websocket.New),
 		libp2p.UserAgent("universal-connectivity/go-peer"),
 
 		libp2p.BandwidthReporter(bwc),
@@ -572,7 +574,6 @@ func savePeerstore(path string) error {
 			if strings.Contains(s, "/ip6/") ||
 				strings.Contains(s, "/udp/") ||
 				strings.Contains(s, "/quic") ||
-				strings.Contains(s, "/wss/") ||
 				strings.Contains(s, "webrtc") ||
 				strings.Contains(s, "/dns/") {
 				continue

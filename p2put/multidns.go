@@ -22,7 +22,7 @@ func resolveAllDNSAddrsInit() {
 	for _, addrs := range resolvedMap {
 		for _, addr := range addrs {
 			if strings.Contains(addr, ":") ||
-				strings.Contains(addr, "/udp/") || strings.Contains(addr, "/wss/") {
+				strings.Contains(addr, "/udp/") {
 				continue
 			}
 			if !containsAddr(extraStaticRelays, addr) {
