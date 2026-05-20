@@ -144,6 +144,10 @@ func (c *RelayClient) dialNoise(ctx context.Context, addr string) (net.Conn, err
 	if err != nil {
 		return nil, err
 	}
+	if tcp, ok := raw.(*net.TCPConn); ok {
+		tcp.SetKeepAlive(true)
+		tcp.SetKeepAlivePeriod(15 * time.Second)
+	}
 	if err := MSSelect(raw, "/noise"); err != nil {
 		raw.Close()
 		return nil, err
@@ -167,6 +171,11 @@ func (c *RelayClient) setupSession(secure net.Conn) error {
 		return fmt.Errorf("yamux client: %w", err)
 	}
 	c.session = session
+
+	go func() {
+		<-session.CloseChan()
+		log.Printf("yamux session closed")
+	}()
 
 	go c.pullIdentify(session)
 
@@ -485,6 +494,56 @@ func (c *RelayClient) Reserve(ctx context.Context) error {
 		c.reservationExpiry = time.Unix(int64(resp.Reservation.Expire), 0)
 		c.mu.Unlock()
 		log.Printf("Reserve: reservation obtained, expire=%ds", resp.Reservation.Expire)
+	}
+	if resp.Limit != nil {
+		log.Printf("Reserve: limit duration=%ds data=%d", resp.Limit.Duration, resp.Limit.Data)
+	}
+	return nil
+}
+
+func (c *RelayClient) RefreshReservation(ctx context.Context) error {
+	c.mu.Lock()
+	s := c.session
+	c.mu.Unlock()
+
+	if s == nil {
+		return errors.New("not connected")
+	}
+
+	stream, err := s.Open()
+	if err != nil {
+		return fmt.Errorf("open stream: %w", err)
+	}
+	defer stream.Close()
+
+	if err := MSSelect(stream, "/libp2p/circuit/relay/0.2.0/hop"); err != nil {
+		return fmt.Errorf("hop negotiate: %w", err)
+	}
+
+	reserveMsg := &HopMessage{Type: HopTypeReserve}
+	if err := writePbMessage(stream, encodeHopMessage(reserveMsg)); err != nil {
+		return fmt.Errorf("send RESERVE: %w", err)
+	}
+
+	respData, err := readOnePb(stream)
+	if err != nil {
+		return fmt.Errorf("read response: %w", err)
+	}
+
+	resp, err := decodeHopMessage(respData)
+	if err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+
+	if resp.Type != HopTypeStatus || resp.Status != StatusOK {
+		return fmt.Errorf("%w: refresh failed", ErrRelayStatus)
+	}
+
+	if resp.Reservation != nil {
+		c.mu.Lock()
+		c.reservationExpiry = time.Unix(int64(resp.Reservation.Expire), 0)
+		c.mu.Unlock()
+		log.Printf("RefreshReservation: renewed, expire=%ds", resp.Reservation.Expire)
 	}
 	return nil
 }

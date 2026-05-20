@@ -91,6 +91,10 @@ func ConnectTLS(ctx context.Context, relayAddr string, key ed25519.PrivateKey) (
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", relayAddr, err)
 	}
+	if tcp, ok := raw.(*net.TCPConn); ok {
+		tcp.SetKeepAlive(true)
+		tcp.SetKeepAlivePeriod(15 * time.Second)
+	}
 
 	if err := MSSelect(raw, "/tls/1.0.0"); err != nil {
 		raw.Close()

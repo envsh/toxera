@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/envsh/toxera/fedkey"
 	"github.com/envsh/toxera/relayhub"
@@ -41,9 +42,23 @@ func main() {
 	}
 	log.Println("connected to relay, requesting circuit v2 reservation...")
 
+	if err := c.Reserve(ctx); err != nil {
+		log.Fatal("reserve:", err)
+	}
+
 	go func() {
-		if err := c.Reserve(ctx); err != nil {
-			log.Printf("reserve failed (non-fatal): %v", err)
+		t := time.NewTicker(5 * time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				log.Println("refreshing reservation...")
+				if err := c.RefreshReservation(ctx); err != nil {
+					log.Printf("refresh reservation failed: %v", err)
+				}
+			}
 		}
 	}()
 
@@ -57,7 +72,8 @@ func main() {
 	for {
 		conn, err := c.AcceptRelay(ctx)
 		if err != nil {
-			log.Fatal("accept:", err)
+			log.Printf("session closed: %v, exiting.", err)
+			os.Exit(1)
 		}
 		log.Println("relayed connection accepted, reading...")
 		go func() {
