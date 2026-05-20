@@ -564,7 +564,20 @@ func savePeerstore(path string) error {
 		}
 		var as []string
 		for _, a := range addrs {
-			as = append(as, a.String())
+			ip := extractIPFromAddr(a)
+			if ip != nil && (ip.IsLoopback() || ip.IsPrivate()) {
+				continue
+			}
+			s := a.String()
+			if strings.Contains(s, "/ip6/") ||
+				strings.Contains(s, "/udp/") ||
+				strings.Contains(s, "/quic") ||
+				strings.Contains(s, "/wss/") ||
+				strings.Contains(s, "webrtc") ||
+				strings.Contains(s, "/dns/") {
+				continue
+			}
+			as = append(as, s)
 		}
 		m[p.String()] = as
 	}
