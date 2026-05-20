@@ -29,6 +29,7 @@ type Config struct {
 	// usage2, assign direct, without Fset.parse
 	KeyFile    string // fedkey seed file
 	ListenPort int
+	ClusterName string // VlanName, our every nodes same name for find
 
 	Server bool
 	Dht   bool
@@ -46,6 +47,7 @@ type Config struct {
 
 var dftConfig = Config{
 	KeyFile: "key.txt",
+	ClusterName: "libp2p-bootstrap-test",
 	Dht: true,
 	ResRate: 0.2,
 	Relay: true,
