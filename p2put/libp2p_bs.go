@@ -225,6 +225,7 @@ func mainLibp2p(cfg Config) {
 			if err := savePeerstore(peerstorePath); err != nil {
 				log.Printf("[peerstore] save error: %v", err)
 			}
+			cleanPeerstore()
 		}
 	}()
 
@@ -638,4 +639,23 @@ func loadPeerstore(h host.Host, path string) error {
 	}
 	log.Printf("[peerstore] loaded %d peers from %s", len(m), path)
 	return nil
+}
+
+func cleanPeerstore() {
+	if bootres == nil || bootres.Host == nil {
+		return
+	}
+	h := bootres.Host
+	ps := h.Peerstore()
+	for _, pid := range ps.Peers() {
+		if isBootstrapPeer(pid) {
+			continue
+		}
+		if h.Network().Connectedness(pid) != network.Connected {
+			if aps, ok := ps.(peerstore.AddrBook); ok {
+				aps.ClearAddrs(pid)
+			}
+			ps.RemovePeer(pid)
+		}
+	}
 }
