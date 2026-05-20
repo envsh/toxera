@@ -1,10 +1,9 @@
 package p2put
 
 import (
+	"fmt"
 	"net"
-	// "errors"
 	"time"
-	// "fmt"
 	"context"
 
 	"github.com/libp2p/go-libp2p/core/host"
@@ -79,6 +78,20 @@ func extractIPFromAddr(addr multiaddr.Multiaddr) net.IP {
 		}
 	}
 	return nil
+}
+
+func extractRelayPeerID(addr multiaddr.Multiaddr) (peer.ID, error) {
+	relayPart, _ := multiaddr.SplitFunc(addr, func(c multiaddr.Component) bool {
+		return c.Protocol().Code == multiaddr.P_CIRCUIT
+	})
+	if relayPart == nil {
+		return "", fmt.Errorf("not a relay address")
+	}
+	pidStr, err := relayPart.ValueForProtocol(multiaddr.P_P2P)
+	if err != nil {
+		return "", err
+	}
+	return peer.Decode(pidStr)
 }
 
 

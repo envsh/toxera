@@ -209,9 +209,12 @@ type AddrResp struct {
 }
 
 type ConnResp struct {
-	PeerID    string `json:"peer_id"`
-	Addr      string `json:"addr"`
-	Direction string `json:"direction"`
+	PeerID      string   `json:"peer_id"`
+	Addr        string   `json:"addr"`
+	Direction   string   `json:"direction"`
+	IsRelay     bool     `json:"is_relay"`
+	RelayPeer   string   `json:"relay_peer,omitempty"`
+	DirectAddrs []string `json:"direct_addrs,omitempty"`
 }
 
 type DHTResp struct {
@@ -226,9 +229,10 @@ type StorePeerEntry struct {
 }
 
 type TopicEntry struct {
-	Topic      string `json:"topic"`
-	Subscribed bool   `json:"subscribed"`
-	IsTag      bool   `json:"is_tag"`
+	Topic      string   `json:"topic"`
+	Peers      []string `json:"peers"`
+	Subscribed bool     `json:"subscribed"`
+	IsTag      bool     `json:"is_tag"`
 }
 
 type NoopValidator struct {}
@@ -399,15 +403,33 @@ func CollectConns() ([]ConnResp, error) {
 	}
 	var out []ConnResp
 	for _, c := range bootres.Host.Network().Conns() {
+		if isBootstrapPeer(c.RemotePeer()) {
+			continue
+		}
 		dir := "outbound"
 		if c.Stat().Direction == network.DirInbound {
 			dir = "inbound"
 		}
-		out = append(out, ConnResp{
+		entry := ConnResp{
 			PeerID:    c.RemotePeer().String(),
 			Addr:      c.RemoteMultiaddr().String(),
 			Direction: dir,
-		})
+		}
+		if c.Stat().Limited {
+			entry.IsRelay = true
+			if rpid, err := extractRelayPeerID(c.RemoteMultiaddr()); err == nil {
+				entry.RelayPeer = rpid.String()
+			}
+			for _, a := range bootres.Host.Peerstore().Addrs(c.RemotePeer()) {
+				if !isRelayAddr(a) {
+					entry.DirectAddrs = append(entry.DirectAddrs, a.String())
+				}
+			}
+			if entry.DirectAddrs == nil {
+				entry.DirectAddrs = []string{}
+			}
+		}
+		out = append(out, entry)
 	}
 	return out, nil
 }
@@ -532,12 +554,16 @@ func CollectTopics() []TopicEntry {
 	for _, t := range bootres.PSO.GetTopics() {
 		seen[t] = &TopicEntry{Topic: t}
 	}
-	topicSubs.Range(func(key, _ any) bool {
+	topicSubs.Range(func(key, val any) bool {
 		t := key.(string)
+		topic := val.(*pubsub.Topic)
 		if _, ok := seen[t]; !ok {
 			seen[t] = &TopicEntry{Topic: t}
 		}
 		seen[t].Subscribed = true
+		for _, p := range topic.ListPeers() {
+			seen[t].Peers = append(seen[t].Peers, p.String())
+		}
 		return true
 	})
 	discoveryTags.Range(func(key, _ any) bool {
