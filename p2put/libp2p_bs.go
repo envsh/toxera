@@ -9,10 +9,12 @@ import (
 	"encoding/json"
 	// "flag"
 	"fmt"
+	"hash/fnv"
 	"net"
 	"os"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/envsh/toxera/fedkey"
@@ -420,37 +422,63 @@ func Libp2pBootstrap(ctx context.Context, cfg Config) (*Libp2pBootResult, error)
 }
 
 func myDiscoveryV2() {
+	type tagState struct {
+		nextAt time.Time
+		busy   bool
+	}
+
 	rd := bootres.Discovery
+	var tagStates sync.Map
+
 	for {
-		var tags []string
+		time.Sleep(300 * time.Millisecond)
 		discoveryTags.Range(func(key, _ any) bool {
-			tags = append(tags, key.(string))
+			tag := key.(string)
+			st, loaded := tagStates.Load(tag)
+			if !loaded {
+				h := fnv.New32a()
+				h.Write([]byte(tag))
+				phase := time.Duration(h.Sum32()%20) * time.Second
+				st = &tagState{nextAt: time.Now().Add(-20*time.Second + phase)}
+				tagStates.Store(tag, st)
+			}
+			s := st.(*tagState)
+			if s.busy || time.Since(s.nextAt) < 0 {
+				return true
+			}
+			s.busy = true
+			s.nextAt = time.Now().Add(20 * time.Second)
+			go func(tag string) {
+				findAndConnect(tag, rd)
+				if v, _ := tagStates.Load(tag); v != nil {
+					v.(*tagState).busy = false
+				}
+			}(tag)
 			return true
 		})
-		for _, tag := range tags {
-			findCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			peerChan, err := rd.FindPeers(findCtx, tag)
-			if err != nil {
-				cancel()
-				continue
-			}
-			for p := range peerChan {
-				if p.ID == bootres.Host.ID() || p.ID == "" {
-					continue
-				}
-				if bootres.Host.Network().Connectedness(p.ID) != network.Connected {
-					dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
-					if err := bootres.Host.Connect(dialCtx, p); err != nil {
-						log.Printf("[discovery] connect %s: %v", p.ID.ShortString(), err)
-					} else {
-						log.Printf("[discovery] connected to %s", p.ID.ShortString())
-					}
-					dialCancel()
-				}
-			}
-			cancel()
+	}
+}
+
+func findAndConnect(tag string, rd *routing.RoutingDiscovery) {
+	findCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	peerChan, err := rd.FindPeers(findCtx, tag)
+	if err != nil {
+		return
+	}
+	for p := range peerChan {
+		if p.ID == bootres.Host.ID() || p.ID == "" {
+			continue
 		}
-		time.Sleep(20 * time.Second)
+		if bootres.Host.Network().Connectedness(p.ID) != network.Connected {
+			dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := bootres.Host.Connect(dialCtx, p); err != nil {
+				log.Printf("[discovery] connect %s: %v", p.ID.ShortString(), err)
+			} else {
+				log.Printf("[discovery] connected to %s", p.ID.ShortString())
+			}
+			dialCancel()
+		}
 	}
 }
 
