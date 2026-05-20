@@ -491,10 +491,13 @@ func findAndConnect(tag string, rd *routing.RoutingDiscovery) {
 		}
 		if bootres.Host.Network().Connectedness(p.ID) != network.Connected {
 			dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			t0 := time.Now()
 			if err := bootres.Host.Connect(dialCtx, p); err != nil {
 				log.Printf("[discovery] connect %s: %v", p.ID.ShortString(), err)
 			} else {
-				log.Printf("[discovery] connected to %s", p.ID.ShortString())
+				elapsed := time.Since(t0)
+				log.Printf("[discovery] connected to %s in %v", p.ID.ShortString(), elapsed)
+				updatePeerLatency(p.ID, elapsed)
 			}
 			dialCancel()
 		}
@@ -532,6 +535,7 @@ func myEventSuber(h host.Host, evts ...any) {
 			case event.EvtLocalReachabilityChanged:
 				bootres.NATStatus = e.Reachability
 			case event.EvtPeerConnectednessChanged:
+				handlePeerConnectednessChanged(e)
 			}
 		}
 	}()
