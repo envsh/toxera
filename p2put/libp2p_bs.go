@@ -5,6 +5,7 @@ package p2put
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
 	// "flag"
@@ -24,6 +25,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/p2p/discovery/routing"
 	"github.com/libp2p/go-libp2p/p2p/host/autorelay"
@@ -87,6 +89,9 @@ var libp2pBootstrap = []string{
 	"/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
 	"/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
 }
+
+var peerstorePath = "/tmp/libp2p_peerstore.json"
+var savedPeerstoreSum string
 
 func init() {
 	if len(libp2pBootstrap) != len(dht.DefaultBootstrapPeers) {
@@ -209,6 +214,18 @@ func mainLibp2p(cfg Config) {
 
 	myDumpBoot(res.Host, res.DHT)
 	bootres = res
+
+	loadPeerstore(res.Host, peerstorePath)
+
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := savePeerstore(peerstorePath); err != nil {
+				log.Printf("[peerstore] save error: %v", err)
+			}
+		}
+	}()
 
 	go myDiscoveryV2()
 
@@ -532,4 +549,75 @@ func GetCurrConns (h host.Host) (discoveredSet map[peer.ID]struct{}) {
 		discoveredSet[conn.RemotePeer()] = struct{}{}
 	}
 	return discoveredSet
+}
+
+func savePeerstore(path string) error {
+	if bootres == nil || bootres.Host == nil {
+		return fmt.Errorf("peerstore not ready")
+	}
+	ps := bootres.Host.Peerstore()
+	m := make(map[string][]string)
+	for _, p := range ps.Peers() {
+		addrs := ps.Addrs(p)
+		if len(addrs) == 0 {
+			continue
+		}
+		var as []string
+		for _, a := range addrs {
+			as = append(as, a.String())
+		}
+		m[p.String()] = as
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+
+	cs := fmt.Sprintf("%x", md5.Sum(raw))
+	if cs == savedPeerstoreSum {
+		return nil
+	}
+	savedPeerstoreSum = cs
+
+	if err := os.WriteFile(path, raw, 0644); err != nil {
+		return fmt.Errorf("write: %w", err)
+	}
+	log.Printf("[peerstore] saved %d peers", len(m))
+	return nil
+}
+
+func loadPeerstore(h host.Host, path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read: %w", err)
+	}
+	var m map[string][]string
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return fmt.Errorf("unmarshal: %w", err)
+	}
+	for idStr, addrs := range m {
+		pid, err := peer.Decode(idStr)
+		if err != nil {
+			continue
+		}
+		var mas []multiaddr.Multiaddr
+		for _, a := range addrs {
+			ma, err := multiaddr.NewMultiaddr(a)
+			if err != nil {
+				continue
+			}
+			mas = append(mas, ma)
+		}
+		if len(mas) > 0 {
+			h.Peerstore().AddAddrs(pid, mas, peerstore.PermanentAddrTTL)
+		}
+	}
+	log.Printf("[peerstore] loaded %d peers from %s", len(m), path)
+	return nil
 }
