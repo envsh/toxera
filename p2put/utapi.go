@@ -214,11 +214,15 @@ type ConnResp struct {
 }
 
 type DHTResp struct {
-	Size  int      `json:"size"`
-	Peers []string `json:"peers"`
+	Size   int      `json:"size"`
+	Peers  []string `json:"peers"`
 	Topics []string `json:"topics"`
 }
 
+type StorePeerEntry struct {
+	PeerID string   `json:"peer_id"`
+	Addrs  []string `json:"addrs"`
+}
 
 type NoopValidator struct {}
 func (NoopValidator) Validate(key string, value []byte) error { return nil }
@@ -474,4 +478,41 @@ func CollectRelays() (RelayResp, error) {
 		Candidates: candidates,
 		Connected:  connected,
 	}, nil
+}
+
+func CollectStorePeers() []StorePeerEntry {
+	if bootres == nil || bootres.Host == nil {
+		return nil
+	}
+	ps := bootres.Host.Peerstore()
+	var out []StorePeerEntry
+	for _, p := range ps.Peers() {
+		addrs := ps.Addrs(p)
+		if len(addrs) == 0 {
+			continue
+		}
+		var as []string
+		for _, a := range addrs {
+			s := a.String()
+			if strings.Contains(s, "/ip6/") ||
+				strings.Contains(s, "/udp/") ||
+				strings.Contains(s, "/quic") ||
+				strings.Contains(s, "webrtc") ||
+				strings.Contains(s, "/dns/") {
+				continue
+			}
+			as = append(as, s)
+		}
+		if len(as) == 0 {
+			continue
+		}
+		out = append(out, StorePeerEntry{
+			PeerID: p.String(),
+			Addrs:  as,
+		})
+	}
+	if out == nil {
+		out = []StorePeerEntry{}
+	}
+	return out
 }

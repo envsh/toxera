@@ -1,6 +1,8 @@
 package p2put
 
 import (
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -124,4 +126,98 @@ func updatePeerLatency(pid peer.ID, elapsed time.Duration) {
 	} else {
 		si.avgLatency = time.Duration(float64(elapsed)*0.3 + float64(si.avgLatency)*0.7)
 	}
+}
+
+func peerScore(si *stableInfo) float64 {
+	score := 0.0
+	if !si.onlineSince.IsZero() {
+		score += 100
+	}
+	total := si.connCount + si.disconnCount
+	if total > 0 {
+		score += float64(si.connCount) / float64(total) * 50
+	}
+	if si.avgLatency > 0 && si.avgLatency < 10*time.Second {
+		score += (1 - float64(si.avgLatency)/float64(10*time.Second)) * 50
+	}
+	return score
+}
+
+type StablePeerEntry struct {
+	PeerID      string   `json:"peer_id"`
+	Addrs       []string `json:"addrs"`
+	FirstSeen   string   `json:"first_seen"`
+	OnlineSince string   `json:"online_since"`
+	TotalOnline string   `json:"total_online"`
+	LastSeen    string   `json:"last_seen"`
+	ConnCount   int      `json:"conn_count"`
+	DisconnCnt  int      `json:"disconn_count"`
+	AvgLatency  string   `json:"avg_latency"`
+	Online      bool     `json:"online"`
+}
+
+func fmtTime(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	return t.Format(time.RFC3339)
+}
+
+func CollectStablePeers() []StablePeerEntry {
+	stablePeersMu.RLock()
+	defer stablePeersMu.RUnlock()
+	type scored struct {
+		entry       StablePeerEntry
+		score       float64
+		totalOnline time.Duration
+	}
+	tmp := make([]scored, 0, len(stablePeers))
+	for pid, si := range stablePeers {
+		var addrs []string
+		if bootres != nil && bootres.Host != nil {
+			ps := bootres.Host.Peerstore()
+			for _, a := range ps.Addrs(pid) {
+				s := a.String()
+				if strings.Contains(s, "/ip6/") ||
+					strings.Contains(s, "/udp/") ||
+					strings.Contains(s, "/quic") ||
+					strings.Contains(s, "webrtc") ||
+					strings.Contains(s, "/dns/") {
+					continue
+				}
+				ip := extractIPFromAddr(a)
+				if ip != nil && (ip.IsLoopback() || ip.IsPrivate()) {
+					continue
+				}
+				addrs = append(addrs, s)
+			}
+		}
+		if addrs == nil {
+			addrs = []string{}
+		}
+		tmp = append(tmp, scored{
+			entry: StablePeerEntry{
+				PeerID:      pid.String(),
+				Addrs:       addrs,
+				FirstSeen:   fmtTime(si.firstSeen),
+				OnlineSince: fmtTime(si.onlineSince),
+				TotalOnline: si.totalOnline.String(),
+				LastSeen:    fmtTime(si.lastSeen),
+				ConnCount:   si.connCount,
+				DisconnCnt:  si.disconnCount,
+				AvgLatency:  si.avgLatency.String(),
+				Online:      !si.onlineSince.IsZero(),
+			},
+			score:       peerScore(si),
+			totalOnline: si.totalOnline,
+		})
+	}
+	sort.Slice(tmp, func(i, j int) bool {
+		return tmp[i].totalOnline > tmp[j].totalOnline
+	})
+	out := make([]StablePeerEntry, len(tmp))
+	for i, s := range tmp {
+		out[i] = s.entry
+	}
+	return out
 }

@@ -28,6 +28,8 @@ func InstallRestHandler(path string, mux *http.ServeMux) {
 	myinstall("events", onEvents)
 	myinstall("send", onSend)
 	myinstall("unsub", onUnsub)
+	myinstall("store_peers", onStorePeers)
+	myinstall("stable_peers", onStablePeers)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -241,5 +243,13 @@ func onUnsub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]bool{"ok": true})
+}
+
+func onStorePeers(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, CollectStorePeers())
+}
+
+func onStablePeers(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, CollectStablePeers())
 }
 
