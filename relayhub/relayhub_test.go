@@ -244,7 +244,7 @@ func TestWriteReadPbMessage(t *testing.T) {
 	}
 }
 
-func TestBudgetedConnCounting(t *testing.T) {
+func TestRelaySocketCounting(t *testing.T) {
 	r, w := net.Pipe()
 	defer r.Close()
 	defer w.Close()
@@ -260,12 +260,13 @@ func TestBudgetedConnCounting(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	s := &BudgetedConn{
+	s := &RelaySocket{
+		id:         "test-socket",
+		ch:         make(chan *RelayedConn, 8),
 		limitBytes: 1024,
+		cur:        newRelayedConn(r),
 		ctx:        ctx,
 		cancel:     cancel,
-		cur:        newRelayedConn(r),
-		dstPeer:    PeerID("test"),
 	}
 
 	data := []byte("hello world")
@@ -293,7 +294,7 @@ func TestBudgetedConnCounting(t *testing.T) {
 	}
 }
 
-func TestBudgetedConnRotation(t *testing.T) {
+func TestRelaySocketRotation(t *testing.T) {
 	r, w := net.Pipe()
 	defer r.Close()
 	defer w.Close()
@@ -305,12 +306,13 @@ func TestBudgetedConnRotation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	s := &BudgetedConn{
+	s := &RelaySocket{
+		id:         "test-socket",
+		ch:         make(chan *RelayedConn, 8),
 		limitBytes: 50,
+		cur:        newRelayedConn(r),
 		ctx:        ctx,
 		cancel:     cancel,
-		cur:        newRelayedConn(r),
-		dstPeer:    PeerID("test"),
 	}
 
 	// write 50 bytes to exhaust budget
@@ -333,14 +335,16 @@ func TestBudgetedConnRotation(t *testing.T) {
 	}
 }
 
-func TestBudgetedConnClose(t *testing.T) {
+func TestRelaySocketClose(t *testing.T) {
 	r, _ := net.Pipe()
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &BudgetedConn{
+	s := &RelaySocket{
+		id:     "test-socket",
+		ch:     make(chan *RelayedConn, 8),
 		limitBytes: 100,
-		ctx:        ctx,
-		cancel:     cancel,
-		cur:        newRelayedConn(r),
+		cur:    newRelayedConn(r),
+		ctx:    ctx,
+		cancel: cancel,
 	}
 
 	if err := s.Close(); err != nil {
@@ -358,11 +362,11 @@ func TestGenerateConnID(t *testing.T) {
 	if s1 == s2 {
 		t.Fatal("conn IDs should differ")
 	}
-	if !strings.HasPrefix(s1, "open0.") || !strings.HasPrefix(s2, "open0.") {
-		t.Fatalf("conn ID missing open0. prefix: %q %q", s1, s2)
+	if !strings.HasPrefix(s1, "sock.") || !strings.HasPrefix(s2, "sock.") {
+		t.Fatalf("conn ID missing sock. prefix: %q %q", s1, s2)
 	}
-	if len(s1) != 31 {
-		t.Fatalf("conn ID length %d, want 31 (format open0.20060102.150405.000000000)", len(s1))
+	if len(s1) != 30 {
+		t.Fatalf("conn ID length %d, want 30 (format sock.20060102.150405.000000000)", len(s1))
 	}
 }
 

@@ -43,28 +43,28 @@ func main() {
 		log.Fatal("reserve:", err)
 	}
 
+	c.Start(ctx)
+
 	log.Println("waiting for budgeted connection...")
-	bc, err := relayhub.NewBudgetedListener(ctx, c)
-	if err != nil {
-		log.Fatal("accept budgeted:", err)
-	}
-	defer bc.Close()
+	sock := c.NewSocket()
+	sock.Listen()
+	defer sock.Close()
 
 	var recv atomic.Int64
 	h := md5.New()
 	buf := make([]byte, 64<<10)
 	for {
-		n, err := bc.Read(buf)
+		n, err := sock.Read(buf)
 		if err != nil {
-			log.Printf("read error: %v (conn=%s recv=%d rotations=%d)", err, bc.ConnID(), recv.Load(), bc.Rotations())
+			log.Printf("read error: %v (sock=%s recv=%d rotations=%d)", err, sock.ID(), recv.Load(), sock.Rotations())
 			break
 		}
 		h.Write(buf[:n])
 		total := recv.Add(int64(n))
 		if total%(512<<10) == 0 {
-			log.Printf("recv %d bytes (conn=%s rotations=%d remaining=%d)",
-				total, bc.ConnID(), bc.Rotations(), bc.Remaining())
+			log.Printf("recv %d bytes (sock=%s rotations=%d remaining=%d)",
+				total, sock.ID(), sock.Rotations(), sock.Remaining())
 		}
 	}
-	log.Printf("done, total recv=%d md5=%x (conn=%s rotations=%d)", recv.Load(), h.Sum(nil), bc.ConnID(), bc.Rotations())
+	log.Printf("done, total recv=%d md5=%x (sock=%s rotations=%d)", recv.Load(), h.Sum(nil), sock.ID(), sock.Rotations())
 }

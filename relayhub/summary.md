@@ -18,18 +18,13 @@
 - `cmd/scanrelay` 简化：313 行 → 162 行，复用 `DetectRelay`，删除重复 protobuf/varint/yamux 代码
 - 保活增强：mux.go yamux KeepAliveInterval 30s→10s；relay.go/tls.go TCP SetKeepAlive+SetKeepAlivePeriod(15s)；session CloseChan 监听日志
 - cmd/peer/main.go：Reserve 改为同步调用，每 5min 定时 RefreshReservation()，可配 -relay 参数
-- 12 个单元测试全部通过，go build/vet 无问题
+- 15 个单元测试全部通过，go build/vet 无问题
 - **Round 1 (P0)**: `readOnePb` 加 4096 上限；所有 relay 协议 stream（Reserve/RefreshReservation/connectV2Hop/connectV1Hop）统一设 `SetDeadline(60s)`
 - **Round 2 (P0)**: Identify 响应补全 field 8 signed peer record（Envelope + PeerRecord protobuf, ed25519 签名）；`circuitpb.go` 新增 `encodeAddressInfo`/`encodePeerRecord`/`encodeEnvelope`；`detect.go` `parseIdentify` 加 `case 8` 捕获
 - **Round 3 (P3)**: `MaProtos` 表 10 条根据官方 multicodec 表更正；新增 `webrtc`/`tls`/`noise`；`certhash` value 以 hex 显示
 - **Round 4 (P3)**: `handleIncoming` 注册 `/libp2p/autonat/1.0.0`、`/libp2p/autonat/2/dial-back`、`/libp2p/autonat/2/dial-request`、`/libp2p/dcutr` 4 个新协议处理（均 `rejectStream`: 读 pb → 日志 → 关流）；修复已有 `/ipfs/kad/1.0.0` 的流泄漏
 - **Round 5 (P3)**: `handlePing` 从 `io.ReadFull(buf,32)` 固定大小改为 `readOnePb` + `writePbMessage` 回显，正确支持变长 protobuf ping
-
-### In Progress
-- *(none)*
-
-### Blocked
-- 公共中继 `104.131.131.82:4001`（kubo/0.32.1）约 96 秒后主动 EOF 断开连接，即使 yamux keepalive 10s + TCP keepalive 15s + 每 5min refresh reservation 也无法阻止。需换中继测试。
+- **Round 6 (P1)**: `RelaySocket` 虚拟 socket 抽象 + 全局 `dispatchLoop`，替代 BudgetedConn pull 模型；自动 rotate stream 突破 relay 单连接流量限制；删除 `budget.go`，新增 `socket.go`
 
 ## Implementation Architecture
 
@@ -45,11 +40,36 @@ TCP 连接
   └── /ipfs/id/1.0.0 协议处理
 ```
 
+### RelaySocket 架构 — 无限流传输的中继 socket
+
+RelaySocket 是对 libp2p circuit relay 的虚拟 socket 抽象，支持**无限流传输**：
+
+```
+RelayClient.Start() → dispatchLoop (后台常驻)
+                           │
+yamux stream ←─────────────┤
+  → handleIncoming()       │
+    → identify/ping/etc    │ 内联处理，继续循环
+    → STOP 协议            │ 握手后读首条消息 = socket ID
+                           │
+            socket ID ─────┼──→ sockets[sockID].ch ──→ RelaySocket.Accept()
+                           │                              ↕ Read/Write
+                           │                         RelaySocket.Connect() ──→ HOP
+                           │                              ↕ rotateWrite (超限额时自动切换 stream)
+```
+
+核心特性：
+
+- **socket 内部自动 stream 接力**：由于 libp2p relay 对单条 relayed connection 有 `Limit.Data` 流量限制（通常 128KB），`RelaySocket.Write()` 在写满限额后自动 `rotateWrite()` → 新建一条 HOP stream（携带相同 socket ID）→ 继续写入，对上层调用者完全透明。
+- **全局 dispatch loop**：`RelayClient.Start()` 启动一个后台 goroutine 统一接受 yamux stream，`handleIncoming` 处理完非 relay 协议（identify/ping/autonat/dcutr 等），对 relay STOP 协议完成握手后读取首条 protobuf 消息（即 socket ID），然后根据 ID 查 `sockets` registry 分发到对应的 `RelaySocket.ch`。
+- **socket 生命周期**：`NewSocket()` → `Listen()`（标记接收）或 `Connect(dst)`（发起出站）→ `Accept()` / `Read()` / `Write()` → `Close()`（自动从 registry 注销）。
+
 ## File Structure
 
 | 文件 | 职责 |
 |------|------|
-| `relay.go` | `RelayClient`、`RelayedConn`、Connect/Reserve/RefreshReservation/ConnectThroughRelay/AcceptRelay |
+| `relay.go` | `RelayClient`、`RelayedConn`、Connect/Reserve/RefreshReservation/ConnectThroughRelay、dispatchLoop、Start/NewSocket |
+| `socket.go` | `RelaySocket`、generateConnID、Connect/Accept/Read/Write/Close、自动 rotate stream 接力 |
 | `detect.go` | `DetectRelay()` 导出函数、`DetectResult`、`IdentifyInfo`、`parseIdentify` |
 | `tls.go` | go-libp2p 兼容的 TLS 1.3 证书生成 + `ConnectTLS()` |
 | `noise.go` | Noise XX 握手 + noiseConn (net.Conn 包装) |
@@ -59,8 +79,10 @@ TCP 连接
 | `circuitv1.go` | circuit v1 protobuf 手工编解码 (CircuitRelay) |
 | `varint.go` | varint 编解码 |
 | `base58.go` | base58 编解码 (PeerID ↔ string) |
-| `relayhub_test.go` | 单元测试 (12 tests) |
+| `relayhub_test.go` | 单元测试 (15 tests) |
 | `cmd/peer/main.go` | 演示 peer 入口，连接 relay + reserve + 保活 |
+| `cmd/budgeted-peer/main.go` | 接收端演示：RelaySocket + Listen + Read 无限流接收 |
+| `cmd/budgeted-connect/main.go` | 发送端演示：RelaySocket + Connect + Write 无限流发送 |
 | `cmd/detect/main.go` | 204 行，单中继探测 |
 | `cmd/scanrelay/main.go` | 162 行，批量中继扫描 |
 | `cmd/source/main.go` | 中继源聚合 |
@@ -150,6 +172,4 @@ go build ./...
 
 1. 换中继测试（如 `34.59.243.77:4001`，summary 记录 "Circuit v2 hop OK"）
 2. Circuit v2 Reservation Voucher 签名验证
-3. Circuit v2 Limit 执行（客户端侧强制 duration/data 上限）
-4. 在 `RelayedConn` 中实现 Limit 计数器
-5. `DetectRelay()` 加 Noise 回退（当前只试 TLS）
+3. `DetectRelay()` 加 Noise 回退（当前只试 TLS）

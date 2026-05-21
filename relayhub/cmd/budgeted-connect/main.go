@@ -54,12 +54,15 @@ func main() {
 		log.Fatal("reserve:", err)
 	}
 
-	bc, err := relayhub.NewBudgetedConn(ctx, c, dstID)
-	if err != nil {
-		log.Fatal("budgeted connect:", err)
+	c.Start(ctx)
+
+	sock := c.NewSocket()
+	defer sock.Close()
+
+	if _, err := sock.Connect(ctx, dstID); err != nil {
+		log.Fatal("connect through relay:", err)
 	}
-	log.Printf("conn ID: %s", bc.ConnID())
-	defer bc.Close()
+	log.Printf("socket ID: %s", sock.ID())
 
 	h := md5.New()
 	chunk := make([]byte, 8<<10)
@@ -70,16 +73,16 @@ func main() {
 			writeBuf = writeBuf[:remain]
 		}
 		rand.Read(writeBuf)
-		n, err := bc.Write(writeBuf)
+		n, err := sock.Write(writeBuf)
 		if err != nil {
-			log.Fatalf("write at %d: %v", sent, err)
+			log.Fatalf("socket write at %d: %v", sent, err)
 		}
 		h.Write(writeBuf[:n])
 		sent += int64(n)
 		if sent%(512<<10) == 0 || sent == *size {
-			log.Printf("sent %d/%d bytes (conn=%s rotations=%d remaining=%d)",
-				sent, *size, bc.ConnID(), bc.Rotations(), bc.Remaining())
+			log.Printf("sent %d/%d bytes (sock=%s rotations=%d remaining=%d)",
+				sent, *size, sock.ID(), sock.Rotations(), sock.Remaining())
 		}
 	}
-	log.Printf("done, total sent=%d md5=%x (conn=%s rotations=%d)", sent, h.Sum(nil), bc.ConnID(), bc.Rotations())
+	log.Printf("done, total sent=%d md5=%x (sock=%s rotations=%d)", sent, h.Sum(nil), sock.ID(), sock.Rotations())
 }

@@ -10,6 +10,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hashicorp/yamux"
@@ -87,6 +88,11 @@ type RelayClient struct {
 	voucher            []byte
 	limit              *Limit
 	watchdogCancel     context.CancelFunc
+
+	sockets         map[string]*RelaySocket
+	socketMu        sync.RWMutex
+	dispatchCancel  context.CancelFunc
+	dispatchRunning atomic.Bool
 }
 
 func NewRelayClient(id PeerID, key ed25519.PrivateKey) *RelayClient {
@@ -254,6 +260,9 @@ func (c *RelayClient) startWatchdog(ctx context.Context) {
 
 func (c *RelayClient) Close() error {
 	log.Printf("RelayClient.Close: enter")
+
+	c.stopDispatch()
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.watchdogCancel != nil {
@@ -308,6 +317,94 @@ func (c *RelayClient) Connected() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.session != nil && !c.session.IsClosed()
+}
+
+func (c *RelayClient) Start(ctx context.Context) {
+	if c.dispatchRunning.Load() {
+		return
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	c.dispatchCancel = cancel
+	c.dispatchRunning.Store(true)
+	go c.dispatchLoop(ctx)
+}
+
+func (c *RelayClient) NewSocket() *RelaySocket {
+	c.socketMu.Lock()
+	if c.sockets == nil {
+		c.sockets = make(map[string]*RelaySocket)
+	}
+	c.socketMu.Unlock()
+
+	sock := newRelaySocket(c)
+
+	c.socketMu.Lock()
+	c.sockets[sock.id] = sock
+	c.socketMu.Unlock()
+
+	return sock
+}
+
+func (c *RelayClient) stopDispatch() {
+	if c.dispatchRunning.CompareAndSwap(true, false) {
+		if c.dispatchCancel != nil {
+			c.dispatchCancel()
+		}
+	}
+}
+
+func (c *RelayClient) dispatchLoop(ctx context.Context) {
+	c.mu.Lock()
+	s := c.session
+	c.mu.Unlock()
+	if s == nil {
+		log.Printf("dispatchLoop: no session")
+		c.dispatchRunning.Store(false)
+		return
+	}
+
+	log.Printf("dispatchLoop: started")
+	for {
+		stream, err := acceptStreamWithCtx(s, ctx)
+		if err != nil {
+			if err != context.Canceled {
+				log.Printf("dispatchLoop: accept stream: %v", err)
+			}
+			c.dispatchRunning.Store(false)
+			return
+		}
+
+		conn, err := c.handleIncoming(stream)
+		if err != nil {
+			log.Printf("dispatchLoop: handleIncoming error: %v", err)
+			stream.Close()
+			continue
+		}
+		if conn == nil {
+			continue
+		}
+
+		data, err := readOnePb(conn)
+		if err != nil {
+			log.Printf("dispatchLoop: read socket ID: %v", err)
+			conn.Close()
+			continue
+		}
+
+		sockID := strings.TrimRight(string(data), "\n\r\t ")
+		log.Printf("dispatchLoop: socket ID=%s", sockID)
+
+		c.socketMu.RLock()
+		sock, ok := c.sockets[sockID]
+		c.socketMu.RUnlock()
+
+		if ok {
+			sock.dispatchIncoming(conn)
+		} else {
+			log.Printf("dispatchLoop: no socket found for ID=%s", sockID)
+			conn.Close()
+		}
+	}
 }
 
 func (c *RelayClient) ConnectThroughRelay(ctx context.Context, dstPeerID PeerID) (*RelayedConn, error) {
