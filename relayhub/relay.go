@@ -76,6 +76,7 @@ type RelayClient struct {
 	mu      sync.Mutex
 
 	reservationExpiry time.Time
+	limit             *Limit
 	watchdogCancel    context.CancelFunc
 }
 
@@ -303,6 +304,8 @@ func (c *RelayClient) connectV2Hop(s *yamux.Session, dstPeerID PeerID) (*Relayed
 		return nil, fmt.Errorf("open yamux stream: %w", err)
 	}
 
+	stream.SetDeadline(time.Now().Add(60 * time.Second))
+
 	if err := MSSelect(stream, "/libp2p/circuit/relay/0.2.0/hop"); err != nil {
 		stream.Close()
 		return nil, err
@@ -319,10 +322,6 @@ func (c *RelayClient) connectV2Hop(s *yamux.Session, dstPeerID PeerID) (*Relayed
 		return nil, fmt.Errorf("send CONNECT: %w", err)
 	}
 
-	if err := stream.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
-		stream.Close()
-		return nil, fmt.Errorf("set read deadline: %w", err)
-	}
 	respData, err := readOnePb(stream)
 	if err != nil {
 		stream.Close()
@@ -354,6 +353,8 @@ func (c *RelayClient) connectV1Hop(s *yamux.Session, dstPeerID PeerID) (*Relayed
 		return nil, fmt.Errorf("open yamux stream: %w", err)
 	}
 
+	stream.SetDeadline(time.Now().Add(60 * time.Second))
+
 	if err := MSSelect(stream, CircuitV1ProtoID); err != nil {
 		stream.Close()
 		return nil, fmt.Errorf("v1 negotiate: %w", err)
@@ -371,10 +372,6 @@ func (c *RelayClient) connectV1Hop(s *yamux.Session, dstPeerID PeerID) (*Relayed
 		return nil, fmt.Errorf("send HOP: %w", err)
 	}
 
-	if err := stream.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
-		stream.Close()
-		return nil, fmt.Errorf("set read deadline: %w", err)
-	}
 	respData, err := readOnePb(stream)
 	if err != nil {
 		stream.Close()
@@ -462,6 +459,8 @@ func (c *RelayClient) Reserve(ctx context.Context) error {
 	}
 	defer stream.Close()
 
+	stream.SetDeadline(time.Now().Add(60 * time.Second))
+
 	if err := MSSelect(stream, "/libp2p/circuit/relay/0.2.0/hop"); err != nil {
 		return fmt.Errorf("hop negotiate: %w", err)
 	}
@@ -496,6 +495,9 @@ func (c *RelayClient) Reserve(ctx context.Context) error {
 		log.Printf("Reserve: reservation obtained, expire=%ds", resp.Reservation.Expire)
 	}
 	if resp.Limit != nil {
+		c.mu.Lock()
+		c.limit = resp.Limit
+		c.mu.Unlock()
 		log.Printf("Reserve: limit duration=%ds data=%d", resp.Limit.Duration, resp.Limit.Data)
 	}
 	return nil
@@ -515,6 +517,8 @@ func (c *RelayClient) RefreshReservation(ctx context.Context) error {
 		return fmt.Errorf("open stream: %w", err)
 	}
 	defer stream.Close()
+
+	stream.SetDeadline(time.Now().Add(60 * time.Second))
 
 	if err := MSSelect(stream, "/libp2p/circuit/relay/0.2.0/hop"); err != nil {
 		return fmt.Errorf("hop negotiate: %w", err)
@@ -593,7 +597,7 @@ func (c *RelayClient) handleIncoming(stream *yamux.Stream) (*RelayedConn, error)
 	case "/ipfs/id/1.0.0":
 		log.Printf("handleIncoming: got /ipfs/id/1.0.0, sending identify")
 		pubKeyProto := marshalEd25519PubKey(c.key.Public().(ed25519.PublicKey))
-		resp := buildIdentifyResponse(pubKeyProto, []string{
+		resp := c.buildIdentifyResponse(pubKeyProto, []string{
 			CircuitV1ProtoID,
 			"/ipfs/id/1.0.0",
 		})
@@ -704,18 +708,32 @@ func readOnePb(r io.Reader) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if l > 4096 {
+		return nil, errors.New("protobuf message too large")
+	}
 	buf := make([]byte, l)
 	_, err = io.ReadFull(r, buf)
 	return buf, err
 }
 
-func buildIdentifyResponse(pubKey []byte, protocols []string) []byte {
+func (c *RelayClient) buildIdentifyResponse(pubKey []byte, protocols []string) []byte {
 	var b []byte
 	b = append(b, pbEncodeLengthDelimField(1, pubKey)...)
 	for _, p := range protocols {
 		b = append(b, pbEncodeLengthDelimField(3, []byte(p))...)
 	}
 	b = append(b, pbEncodeLengthDelimField(6, []byte("relayhub/0.1.0"))...)
+
+	seq := uint64(time.Now().UnixNano())
+	pr := encodePeerRecord(seq, c.id, nil)
+	payloadType := []byte{0x81, 0x06}
+	sigInput := append([]byte("libp2p-envelope"), pubKey...)
+	sigInput = append(sigInput, payloadType...)
+	sigInput = append(sigInput, pr...)
+	sig := ed25519.Sign(c.key, sigInput)
+	env := encodeEnvelope(pubKey, payloadType, pr, sig)
+	b = append(b, pbEncodeLengthDelimField(8, env)...)
+
 	return b
 }
 

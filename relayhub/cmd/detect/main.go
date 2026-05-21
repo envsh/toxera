@@ -124,15 +124,19 @@ func printV2Hop(r *relayhub.DetectResult) {
 	if r.V2HopOK {
 		relay := ""
 		exp := ""
+		limitStr := ""
 		if r.V2Status == 100 {
 			relay = " YES"
 			if r.V2Expire > 0 {
 				exp = fmt.Sprintf(", expire=%ds", r.V2Expire)
 			}
+			if r.V2LimitData > 0 || r.V2LimitDuration > 0 {
+				limitStr = fmt.Sprintf(", limit: duration=%ds data=%d", r.V2LimitDuration, r.V2LimitData)
+			}
 		}
 		fmt.Printf("  Circuit v2 hop (/libp2p/circuit/relay/0.2.0/hop):\n")
 		fmt.Printf("    Negotiated: yes\n")
-		fmt.Printf("    RESERVE:    %d (%s)%s\n", r.V2Status, statusString(r.V2Status), exp)
+		fmt.Printf("    RESERVE:    %d (%s)%s%s\n", r.V2Status, statusString(r.V2Status), exp, limitStr)
 		fmt.Printf("    Relay:%s\n", relay)
 	} else {
 		fmt.Printf("  Circuit v2 hop (/libp2p/circuit/relay/0.2.0/hop): no\n")

@@ -173,6 +173,32 @@ func encodeStopMessage(msg *StopMessage) []byte {
 	return b
 }
 
+func encodeAddressInfo(id []byte, addrs [][]byte) []byte {
+	var b []byte
+	b = append(b, pbEncodeLengthDelimField(1, id)...)
+	for _, addr := range addrs {
+		b = append(b, pbEncodeLengthDelimField(2, addr)...)
+	}
+	return b
+}
+
+func encodePeerRecord(seq uint64, id []byte, addrs [][]byte) []byte {
+	var b []byte
+	b = append(b, pbEncodeVarintField(1, seq)...)
+	ai := encodeAddressInfo(id, addrs)
+	b = append(b, pbEncodeLengthDelimField(2, ai)...)
+	return b
+}
+
+func encodeEnvelope(pubKey, payloadType, payload, signature []byte) []byte {
+	var b []byte
+	b = append(b, pbEncodeLengthDelimField(1, pubKey)...)
+	b = append(b, pbEncodeLengthDelimField(2, payloadType)...)
+	b = append(b, pbEncodeLengthDelimField(3, payload)...)
+	b = append(b, pbEncodeLengthDelimField(4, signature)...)
+	return b
+}
+
 func writePbMessage(w io.Writer, data []byte) error {
 	_, err := w.Write(append(encodeVarint(uint64(len(data))), data...))
 	return err

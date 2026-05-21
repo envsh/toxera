@@ -11,9 +11,10 @@ import (
 )
 
 type IdentifyInfo struct {
-	PeerID string
-	Agent  string
-	Protos []string
+	PeerID            string
+	Agent             string
+	Protos            []string
+	SignedPeerRecord  []byte
 }
 
 type DetectResult struct {
@@ -32,9 +33,11 @@ type DetectResult struct {
 	V1Code   int
 	V1Status string
 
-	V2HopOK  bool
-	V2Status int32
-	V2Expire uint64
+	V2HopOK         bool
+	V2Status        int32
+	V2Expire        uint64
+	V2LimitDuration uint32
+	V2LimitData     uint64
 
 	V2ConnectOK       bool
 	V2ConnectStatus   int32
@@ -78,7 +81,7 @@ func DetectRelay(ctx context.Context, addr string, key ed25519.PrivateKey) *Dete
 
 	r.Identify, r.IdentifyOK = detectIdentify(sess)
 	r.V1OK, r.V1Code, r.V1Status = detectV1(sess)
-	r.V2HopOK, r.V2Status, r.V2Expire = detectV2Hop(sess)
+	r.V2HopOK, r.V2Status, r.V2Expire, r.V2LimitDuration, r.V2LimitData = detectV2Hop(sess)
 	if r.V2Status == StatusOK {
 		r.V2ConnectOK, r.V2ConnectStatus, r.V2ConnectDuration = detectV2Connect(sess, key)
 	}
@@ -142,6 +145,8 @@ func parseIdentify(data []byte) *IdentifyInfo {
 			info.Protos = append(info.Protos, string(val))
 		case 6:
 			info.Agent = string(val)
+		case 8:
+			info.SignedPeerRecord = val
 		}
 	}
 	return info
@@ -175,36 +180,42 @@ func detectV1(sess *yamux.Session) (bool, int, string) {
 	return true, resp.Code, circuitV1StatusString(resp.Code)
 }
 
-func detectV2Hop(sess *yamux.Session) (bool, int32, uint64) {
+func detectV2Hop(sess *yamux.Session) (bool, int32, uint64, uint32, uint64) {
 	s, err := sess.Open()
 	if err != nil {
-		return false, 0, 0
+		return false, 0, 0, 0, 0
 	}
 	defer s.Close()
 	if MSSelect(s, "/libp2p/circuit/relay/0.2.0/hop") != nil {
-		return false, 0, 0
+		return false, 0, 0, 0, 0
 	}
 
 	reserveMsg := &HopMessage{Type: HopTypeReserve}
 	if err := writePbMessage(s, encodeHopMessage(reserveMsg)); err != nil {
-		return false, 0, 0
+		return false, 0, 0, 0, 0
 	}
 
 	respData, err := readOnePb(s)
 	if err != nil {
-		return false, 0, 0
+		return false, 0, 0, 0, 0
 	}
 
 	resp, err := decodeHopMessage(respData)
 	if err != nil {
-		return false, 0, 0
+		return false, 0, 0, 0, 0
 	}
 
 	expire := uint64(0)
 	if resp.Reservation != nil {
 		expire = resp.Reservation.Expire
 	}
-	return true, resp.Status, expire
+	var limitDur uint32
+	var limitData uint64
+	if resp.Limit != nil {
+		limitDur = resp.Limit.Duration
+		limitData = resp.Limit.Data
+	}
+	return true, resp.Status, expire, limitDur, limitData
 }
 
 func detectV2Connect(sess *yamux.Session, priv ed25519.PrivateKey) (bool, int32, time.Duration) {
