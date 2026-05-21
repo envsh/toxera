@@ -18,6 +18,13 @@ import (
 var ErrRelayStatus = errors.New("relay status error")
 var ErrClosed = errors.New("connection closed")
 
+const (
+	AutoNATProtoID    = "/libp2p/autonat/1.0.0"
+	AutoNATv2DialBack = "/libp2p/autonat/2/dial-back"
+	AutoNATv2DialReq  = "/libp2p/autonat/2/dial-request"
+	DCUtRProtoID      = "/libp2p/dcutr"
+)
+
 type PeerID []byte
 
 func ParsePeerID(s string) (PeerID, error) {
@@ -76,8 +83,10 @@ type RelayClient struct {
 	mu      sync.Mutex
 
 	reservationExpiry time.Time
-	limit             *Limit
-	watchdogCancel    context.CancelFunc
+	reservationAddrs   [][]byte
+	voucher            []byte
+	limit              *Limit
+	watchdogCancel     context.CancelFunc
 }
 
 func NewRelayClient(id PeerID, key ed25519.PrivateKey) *RelayClient {
@@ -268,6 +277,25 @@ func (c *RelayClient) ReservationExpiry() time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.reservationExpiry
+}
+
+func (c *RelayClient) ReservationAddrs() [][]byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.reservationAddrs == nil {
+		return nil
+	}
+	r := make([][]byte, len(c.reservationAddrs))
+	for i, a := range c.reservationAddrs {
+		r[i] = append([]byte{}, a...)
+	}
+	return r
+}
+
+func (c *RelayClient) Voucher() []byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]byte{}, c.voucher...)
 }
 
 func (c *RelayClient) Connected() bool {
@@ -491,8 +519,10 @@ func (c *RelayClient) Reserve(ctx context.Context) error {
 	if resp.Reservation != nil {
 		c.mu.Lock()
 		c.reservationExpiry = time.Unix(int64(resp.Reservation.Expire), 0)
+		c.reservationAddrs = resp.Reservation.Addrs
+		c.voucher = resp.Reservation.Voucher
 		c.mu.Unlock()
-		log.Printf("Reserve: reservation obtained, expire=%ds", resp.Reservation.Expire)
+		log.Printf("Reserve: reservation obtained, expire=%ds, addrs=%d, voucher=%d bytes", resp.Reservation.Expire, len(resp.Reservation.Addrs), len(resp.Reservation.Voucher))
 	}
 	if resp.Limit != nil {
 		c.mu.Lock()
@@ -612,8 +642,20 @@ func (c *RelayClient) handleIncoming(stream *yamux.Stream) (*RelayedConn, error)
 			log.Printf("handleIncoming: relay pushed identify (%d bytes)", len(data))
 		}
 		return nil, nil
+	case AutoNATProtoID:
+		rejectStream(stream, "autonat/v1")
+		return nil, nil
+	case AutoNATv2DialBack:
+		rejectStream(stream, "autonat/v2/dial-back")
+		return nil, nil
+	case AutoNATv2DialReq:
+		rejectStream(stream, "autonat/v2/dial-request")
+		return nil, nil
+	case DCUtRProtoID:
+		rejectStream(stream, "dcutr")
+		return nil, nil
 	case "/ipfs/kad/1.0.0":
-		log.Printf("handleIncoming: got /ipfs/kad/1.0.0, ignoring")
+		rejectStream(stream, "kad")
 		return nil, nil
 	case "/ipfs/ping/1.0.0":
 		go c.handlePing(stream)
@@ -624,19 +666,24 @@ func (c *RelayClient) handleIncoming(stream *yamux.Stream) (*RelayedConn, error)
 	}
 }
 
-func (c *RelayClient) isHandled(conn *RelayedConn, err error) bool {
-	return conn == nil && err == nil
+func rejectStream(stream *yamux.Stream, name string) {
+	defer stream.Close()
+	data, err := readOnePb(stream)
+	if err != nil {
+		log.Printf("handleIncoming: read %s: %v", name, err)
+	} else {
+		log.Printf("handleIncoming: %s (%d bytes)", name, len(data))
+	}
 }
 
 func (c *RelayClient) handlePing(stream *yamux.Stream) {
 	defer stream.Close()
-	buf := make([]byte, 32)
 	for {
-		_, err := io.ReadFull(stream, buf)
+		data, err := readOnePb(stream)
 		if err != nil {
 			return
 		}
-		if _, err := stream.Write(buf); err != nil {
+		if err := writePbMessage(stream, data); err != nil {
 			return
 		}
 	}

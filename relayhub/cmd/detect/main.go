@@ -59,7 +59,7 @@ func main() {
 		if i > 0 {
 			fmt.Println()
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		r := relayhub.DetectRelay(ctx, a, priv)
 		cancel()
 		printResult(r)
@@ -137,6 +137,12 @@ func printV2Hop(r *relayhub.DetectResult) {
 		fmt.Printf("  Circuit v2 hop (/libp2p/circuit/relay/0.2.0/hop):\n")
 		fmt.Printf("    Negotiated: yes\n")
 		fmt.Printf("    RESERVE:    %d (%s)%s%s\n", r.V2Status, statusString(r.V2Status), exp, limitStr)
+		for _, a := range r.V2ReservationAddrs {
+			fmt.Printf("    Addr:      %s\n", relayhub.MultiaddrString(a))
+		}
+		if len(r.V2Voucher) > 0 {
+			fmt.Printf("    Voucher:   %x (%d bytes)\n", r.V2Voucher, len(r.V2Voucher))
+		}
 		fmt.Printf("    Relay:%s\n", relay)
 	} else {
 		fmt.Printf("  Circuit v2 hop (/libp2p/circuit/relay/0.2.0/hop): no\n")

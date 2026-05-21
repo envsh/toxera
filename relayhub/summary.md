@@ -21,6 +21,9 @@
 - 12 个单元测试全部通过，go build/vet 无问题
 - **Round 1 (P0)**: `readOnePb` 加 4096 上限；所有 relay 协议 stream（Reserve/RefreshReservation/connectV2Hop/connectV1Hop）统一设 `SetDeadline(60s)`
 - **Round 2 (P0)**: Identify 响应补全 field 8 signed peer record（Envelope + PeerRecord protobuf, ed25519 签名）；`circuitpb.go` 新增 `encodeAddressInfo`/`encodePeerRecord`/`encodeEnvelope`；`detect.go` `parseIdentify` 加 `case 8` 捕获
+- **Round 3 (P3)**: `MaProtos` 表 10 条根据官方 multicodec 表更正；新增 `webrtc`/`tls`/`noise`；`certhash` value 以 hex 显示
+- **Round 4 (P3)**: `handleIncoming` 注册 `/libp2p/autonat/1.0.0`、`/libp2p/autonat/2/dial-back`、`/libp2p/autonat/2/dial-request`、`/libp2p/dcutr` 4 个新协议处理（均 `rejectStream`: 读 pb → 日志 → 关流）；修复已有 `/ipfs/kad/1.0.0` 的流泄漏
+- **Round 5 (P3)**: `handlePing` 从 `io.ReadFull(buf,32)` 固定大小改为 `readOnePb` + `writePbMessage` 回显，正确支持变长 protobuf ping
 
 ### In Progress
 - *(none)*
@@ -76,7 +79,11 @@ TCP 连接
 | `/libp2p/circuit/relay/0.1.0` | ✅ 已实现（v2 不可用时自动回退） |
 | `/ipfs/id/1.0.0` | ✅ 已实现（含 field 8 signed peer record） |
 | `/ipfs/id/push/1.0.0` | ✅ 已实现（读取并 log 忽略） |
-| `/ipfs/ping/1.0.0` | ✅ 已实现（echo responder） |
+| `/ipfs/ping/1.0.0` | ✅ 已实现（echo responder，protobuf 变长正确支持） |
+| `/libp2p/autonat/1.0.0` | ✅ 已实现（拒绝/未实现） |
+| `/libp2p/autonat/2/dial-back` | ✅ 已实现（拒绝/未实现） |
+| `/libp2p/autonat/2/dial-request` | ✅ 已实现（拒绝/未实现） |
+| `/libp2p/dcutr` | ✅ 已实现（拒绝/未实现） |
 
 ## Key Implementation Details
 
@@ -142,10 +149,7 @@ go build ./...
 ## Next Steps
 
 1. 换中继测试（如 `34.59.243.77:4001`，summary 记录 "Circuit v2 hop OK"）
-2. 补充缺失子协议：
-   - Circuit v2 Reservation Voucher（签名验证，HopMessage.Reservation.Voucher）
-   - Circuit v2 Limit 执行（客户端侧强制 duration/data 上限）
-   - DCUtR（打洞升级）
-   - AutoNAT（NAT 类型探测）
-   - Kademlia DHT responder
-3. 在 `RelayedConn` 中实现 Limit 计数器
+2. Circuit v2 Reservation Voucher 签名验证
+3. Circuit v2 Limit 执行（客户端侧强制 duration/data 上限）
+4. 在 `RelayedConn` 中实现 Limit 计数器
+5. `DetectRelay()` 加 Noise 回退（当前只试 TLS）

@@ -92,7 +92,7 @@ func main() {
 }
 
 func testRelay(addr string, key ed25519.PrivateKey) (result bool, code int, rerr error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
 	r := relayhub.DetectRelay(ctx, addr, key)
