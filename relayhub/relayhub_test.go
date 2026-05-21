@@ -264,8 +264,9 @@ func TestBudgetedConnCounting(t *testing.T) {
 		limitBytes: 1024,
 		ctx:        ctx,
 		cancel:     cancel,
+		cur:        newRelayedConn(r),
+		dstPeer:    PeerID("test"),
 	}
-	s.pool = append(s.pool, &relayCircuit{conn: newRelayedConn(r)})
 
 	data := []byte("hello world")
 	n, err := s.Write(data)
@@ -292,7 +293,7 @@ func TestBudgetedConnCounting(t *testing.T) {
 	}
 }
 
-func TestBudgetedConnPool(t *testing.T) {
+func TestBudgetedConnRotation(t *testing.T) {
 	r, w := net.Pipe()
 	defer r.Close()
 	defer w.Close()
@@ -308,17 +309,27 @@ func TestBudgetedConnPool(t *testing.T) {
 		limitBytes: 50,
 		ctx:        ctx,
 		cancel:     cancel,
+		cur:        newRelayedConn(r),
+		dstPeer:    PeerID("test"),
 	}
-	s.pool = append(s.pool, &relayCircuit{conn: newRelayedConn(r)})
 
-	// write enough to exhaust first circuit
-	for s.Remaining() > 0 {
-		if _, err := s.Write([]byte("A")); err != nil {
-			break
+	// write 50 bytes to exhaust budget
+	for i := 0; i < 50; i++ {
+		n, err := s.Write([]byte("A"))
+		if err != nil {
+			t.Fatalf("write %d: %v", i, err)
+		}
+		if n != 1 {
+			t.Fatalf("write %d n=%d", i, n)
 		}
 	}
 	if s.Remaining() != 0 {
 		t.Fatalf("expected 0 remaining, got %d", s.Remaining())
+	}
+	// next write should rotate (fail without client)
+	_, err := s.Write([]byte("A"))
+	if err == nil {
+		t.Fatal("expected error after exhaustion")
 	}
 }
 
@@ -329,8 +340,8 @@ func TestBudgetedConnClose(t *testing.T) {
 		limitBytes: 100,
 		ctx:        ctx,
 		cancel:     cancel,
+		cur:        newRelayedConn(r),
 	}
-	s.pool = append(s.pool, &relayCircuit{conn: newRelayedConn(r)})
 
 	if err := s.Close(); err != nil {
 		t.Fatalf("close: %v", err)
@@ -352,47 +363,6 @@ func TestGenerateConnID(t *testing.T) {
 	}
 	if len(s1) != 31 {
 		t.Fatalf("conn ID length %d, want 31 (format open0.20060102.150405.000000000)", len(s1))
-	}
-}
-
-func TestCircuitDispatcher(t *testing.T) {
-	rc1r, _ := net.Pipe()
-	rc1 := newRelayedConn(rc1r)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	d := NewCircuitDispatcher(ctx, nil)
-
-	d.unmatched <- pendingCircuit{conn: rc1, cid: "sid-1"}
-
-	rc, sid, ch, err := d.AcceptOne(ctx)
-	if err != nil {
-		t.Fatalf("AcceptOne: %v", err)
-	}
-	if rc != rc1 {
-		t.Fatal("wrong circuit returned")
-	}
-	if sid != "sid-1" {
-		t.Fatalf("wrong sid: %s", sid)
-	}
-	if ch == nil {
-		t.Fatal("nil channel")
-	}
-
-	d.mu.Lock()
-	_, exists := d.sessions["sid-1"]
-	d.mu.Unlock()
-	if !exists {
-		t.Fatal("session not registered after AcceptOne")
-	}
-
-	d.Unregister("sid-1")
-	d.mu.Lock()
-	_, exists = d.sessions["sid-1"]
-	d.mu.Unlock()
-	if exists {
-		t.Fatal("session still registered after Unregister")
 	}
 }
 

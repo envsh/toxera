@@ -2,11 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/md5"
+	"crypto/rand"
 	"flag"
 	"log"
-	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/envsh/toxera/fedkey"
 	"github.com/envsh/toxera/relayhub"
@@ -41,8 +40,7 @@ func main() {
 	}
 
 	privKey := kr.BTDHTKey()
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	ctx := context.Background()
 
 	c := relayhub.NewRelayClient(myID, privKey)
 	defer c.Close()
@@ -63,23 +61,25 @@ func main() {
 	log.Printf("conn ID: %s", bc.ConnID())
 	defer bc.Close()
 
-	chunk := make([]byte, 64<<10)
+	h := md5.New()
+	chunk := make([]byte, 8<<10)
 	sent := int64(0)
 	for sent < *size {
-		writeLen := len(chunk)
-		if remain := *size - sent; remain < int64(writeLen) {
-			chunk = chunk[:remain]
-			writeLen = int(remain)
+		writeBuf := chunk
+		if remain := *size - sent; remain < int64(len(writeBuf)) {
+			writeBuf = writeBuf[:remain]
 		}
-		n, err := bc.Write(chunk)
+		rand.Read(writeBuf)
+		n, err := bc.Write(writeBuf)
 		if err != nil {
 			log.Fatalf("write at %d: %v", sent, err)
 		}
+		h.Write(writeBuf[:n])
 		sent += int64(n)
 		if sent%(512<<10) == 0 || sent == *size {
-			log.Printf("sent %d/%d bytes, rotations=%d remaining=%d",
-				sent, *size, bc.Rotations(), bc.Remaining())
+			log.Printf("sent %d/%d bytes (conn=%s rotations=%d remaining=%d)",
+				sent, *size, bc.ConnID(), bc.Rotations(), bc.Remaining())
 		}
 	}
-	log.Printf("done, total sent=%d rotations=%d", sent, bc.Rotations())
+	log.Printf("done, total sent=%d md5=%x (conn=%s rotations=%d)", sent, h.Sum(nil), bc.ConnID(), bc.Rotations())
 }

@@ -1,7 +1,6 @@
 package relayhub
 
 import (
-	"bytes"
 	"context"
 	"crypto/ed25519"
 	"errors"
@@ -46,9 +45,8 @@ func (id PeerID) Clone() PeerID {
 }
 
 type RelayedConn struct {
-	conn    net.Conn
-	once    sync.Once
-	SrcPeer PeerID
+	conn net.Conn
+	once sync.Once
 }
 
 func newRelayedConn(c net.Conn) *RelayedConn {
@@ -255,17 +253,23 @@ func (c *RelayClient) startWatchdog(ctx context.Context) {
 }
 
 func (c *RelayClient) Close() error {
+	log.Printf("RelayClient.Close: enter")
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.watchdogCancel != nil {
+		log.Printf("RelayClient.Close: stopping watchdog")
 		c.watchdogCancel()
 		c.watchdogCancel = nil
+		log.Printf("RelayClient.Close: watchdog stopped")
 	}
 	if c.session != nil {
+		log.Printf("RelayClient.Close: closing yamux session")
 		err := c.session.Close()
 		c.session = nil
+		log.Printf("RelayClient.Close: yamux session closed, err=%v", err)
 		return err
 	}
+	log.Printf("RelayClient.Close: exit (no session)")
 	return nil
 }
 
@@ -329,12 +333,12 @@ func (c *RelayClient) ConnectThroughRelay(ctx context.Context, dstPeerID PeerID)
 }
 
 func (c *RelayClient) connectV2Hop(s *yamux.Session, dstPeerID PeerID) (*RelayedConn, error) {
+	log.Printf("connectV2Hop: opening yamux stream")
 	stream, err := s.Open()
+	log.Printf("connectV2Hop: yamux stream opened, err=%v", err)
 	if err != nil {
 		return nil, fmt.Errorf("open yamux stream: %w", err)
 	}
-
-	stream.SetDeadline(time.Now().Add(60 * time.Second))
 
 	if err := MSSelect(stream, "/libp2p/circuit/relay/0.2.0/hop"); err != nil {
 		stream.Close()
@@ -378,12 +382,12 @@ func (c *RelayClient) connectV2Hop(s *yamux.Session, dstPeerID PeerID) (*Relayed
 }
 
 func (c *RelayClient) connectV1Hop(s *yamux.Session, dstPeerID PeerID) (*RelayedConn, error) {
+	log.Printf("connectV1Hop: opening yamux stream")
 	stream, err := s.Open()
+	log.Printf("connectV1Hop: yamux stream opened, err=%v", err)
 	if err != nil {
 		return nil, fmt.Errorf("open yamux stream: %w", err)
 	}
-
-	stream.SetDeadline(time.Now().Add(60 * time.Second))
 
 	if err := MSSelect(stream, CircuitV1ProtoID); err != nil {
 		stream.Close()
@@ -584,6 +588,24 @@ func (c *RelayClient) RefreshReservation(ctx context.Context) error {
 	return nil
 }
 
+func acceptStreamWithCtx(s *yamux.Session, ctx context.Context) (*yamux.Stream, error) {
+	type result struct {
+		stream *yamux.Stream
+		err    error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		str, err := s.AcceptStream()
+		ch <- result{str, err}
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case r := <-ch:
+		return r.stream, r.err
+	}
+}
+
 func (c *RelayClient) AcceptRelay(ctx context.Context) (*RelayedConn, error) {
 	c.mu.Lock()
 	s := c.session
@@ -594,9 +616,9 @@ func (c *RelayClient) AcceptRelay(ctx context.Context) (*RelayedConn, error) {
 	}
 
 	for {
-		stream, err := s.AcceptStream()
+		stream, err := acceptStreamWithCtx(s, ctx)
 		if err != nil {
-			return nil, fmt.Errorf("accept stream: %w", err)
+			return nil, err
 		}
 		log.Printf("AcceptRelay: got new yamux stream")
 
@@ -610,19 +632,6 @@ func (c *RelayClient) AcceptRelay(ctx context.Context) (*RelayedConn, error) {
 			continue
 		}
 		return conn, nil
-	}
-}
-
-func (c *RelayClient) AcceptRelayFromPeer(ctx context.Context, src PeerID) (*RelayedConn, error) {
-	for {
-		conn, err := c.AcceptRelay(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if bytes.Equal(conn.SrcPeer, src) {
-			return conn, nil
-		}
-		conn.Close()
 	}
 }
 
@@ -725,9 +734,6 @@ func (c *RelayClient) acceptV1Hop(stream *yamux.Stream) (*RelayedConn, error) {
 			return nil, fmt.Errorf("send v1 status: %w", err)
 		}
 		rc := newRelayedConn(stream)
-		if msg.SrcPeer != nil {
-			rc.SrcPeer = append(PeerID(nil), msg.SrcPeer.ID...)
-		}
 		return rc, nil
 
 	case CircuitV1TypeCanHop:
@@ -767,9 +773,6 @@ func (c *RelayClient) acceptV2Stop(stream *yamux.Stream) (*RelayedConn, error) {
 	}
 
 	rc := newRelayedConn(stream)
-	if msg.Peer != nil {
-		rc.SrcPeer = append(PeerID(nil), msg.Peer.ID...)
-	}
 	return rc, nil
 }
 

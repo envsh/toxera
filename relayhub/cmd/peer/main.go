@@ -5,8 +5,6 @@ import (
 	"flag"
 	"log"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/envsh/toxera/fedkey"
@@ -31,8 +29,7 @@ func main() {
 	log.Println("peer ID:", myID)
 
 	privKey := kr.BTDHTKey()
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	ctx := context.Background()
 
 	c := relayhub.NewRelayClient(myID, privKey)
 	defer c.Close()
@@ -49,23 +46,12 @@ func main() {
 	go func() {
 		t := time.NewTicker(5 * time.Minute)
 		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-				log.Println("refreshing reservation...")
-				if err := c.RefreshReservation(ctx); err != nil {
-					log.Printf("refresh reservation failed: %v", err)
-				}
+		for range t.C {
+			log.Println("refreshing reservation...")
+			if err := c.RefreshReservation(ctx); err != nil {
+				log.Printf("refresh reservation failed: %v", err)
 			}
 		}
-	}()
-
-	go func() {
-		<-ctx.Done()
-		log.Println("shutting down...")
-		c.Close()
 	}()
 
 	log.Println("waiting for incoming relayed connections...")
