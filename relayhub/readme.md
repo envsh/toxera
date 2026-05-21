@@ -14,3 +14,10 @@ relays:
 relay的limit.data值一般128K，总流量太少了。
 
 
+### cmds:
+
+* cmd/detect relay信息检测
+* cmd/peer 基础服务端
+* cmd/source 基础客户端
+* cmd/budgeted-peer 解决relay只转发128k限制的服务端
+* cmd/budgeted-connect 解决relay只转发128k限制的客户端

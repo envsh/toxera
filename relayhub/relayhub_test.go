@@ -2,10 +2,13 @@ package relayhub
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/asn1"
+	"net"
+	"strings"
 	"testing"
 )
 
@@ -240,3 +243,157 @@ func TestWriteReadPbMessage(t *testing.T) {
 		t.Fatalf("data mismatch")
 	}
 }
+
+func TestBudgetedConnCounting(t *testing.T) {
+	r, w := net.Pipe()
+	defer r.Close()
+	defer w.Close()
+
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			if _, err := w.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := &BudgetedConn{
+		limitBytes: 1024,
+		ctx:        ctx,
+		cancel:     cancel,
+	}
+	s.pool = append(s.pool, &relayCircuit{conn: newRelayedConn(r)})
+
+	data := []byte("hello world")
+	n, err := s.Write(data)
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if n != len(data) {
+		t.Fatalf("write n=%d want %d", n, len(data))
+	}
+	if s.WriteTotal() != int64(len(data)) {
+		t.Fatalf("WriteTotal=%d want %d", s.WriteTotal(), len(data))
+	}
+
+	go func() {
+		w.Write([]byte("hi"))
+	}()
+	buf := make([]byte, 4)
+	n, err = s.Read(buf)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if s.ReadTotal() != int64(n) {
+		t.Fatalf("ReadTotal=%d want %d", s.ReadTotal(), n)
+	}
+}
+
+func TestBudgetedConnPool(t *testing.T) {
+	r, w := net.Pipe()
+	defer r.Close()
+	defer w.Close()
+
+	go func() {
+		buf := make([]byte, 4096)
+		for { if _, err := w.Read(buf); err != nil { return } }
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := &BudgetedConn{
+		limitBytes: 50,
+		ctx:        ctx,
+		cancel:     cancel,
+	}
+	s.pool = append(s.pool, &relayCircuit{conn: newRelayedConn(r)})
+
+	// write enough to exhaust first circuit
+	for s.Remaining() > 0 {
+		if _, err := s.Write([]byte("A")); err != nil {
+			break
+		}
+	}
+	if s.Remaining() != 0 {
+		t.Fatalf("expected 0 remaining, got %d", s.Remaining())
+	}
+}
+
+func TestBudgetedConnClose(t *testing.T) {
+	r, _ := net.Pipe()
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &BudgetedConn{
+		limitBytes: 100,
+		ctx:        ctx,
+		cancel:     cancel,
+	}
+	s.pool = append(s.pool, &relayCircuit{conn: newRelayedConn(r)})
+
+	if err := s.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if !s.closed.Load() {
+		t.Fatal("closed flag not set")
+	}
+	_ = s.Close()
+}
+
+func TestGenerateConnID(t *testing.T) {
+	s1 := generateConnID()
+	s2 := generateConnID()
+	if s1 == s2 {
+		t.Fatal("conn IDs should differ")
+	}
+	if !strings.HasPrefix(s1, "open0.") || !strings.HasPrefix(s2, "open0.") {
+		t.Fatalf("conn ID missing open0. prefix: %q %q", s1, s2)
+	}
+	if len(s1) != 31 {
+		t.Fatalf("conn ID length %d, want 31 (format open0.20060102.150405.000000000)", len(s1))
+	}
+}
+
+func TestCircuitDispatcher(t *testing.T) {
+	rc1r, _ := net.Pipe()
+	rc1 := newRelayedConn(rc1r)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	d := NewCircuitDispatcher(ctx, nil)
+
+	d.unmatched <- pendingCircuit{conn: rc1, cid: "sid-1"}
+
+	rc, sid, ch, err := d.AcceptOne(ctx)
+	if err != nil {
+		t.Fatalf("AcceptOne: %v", err)
+	}
+	if rc != rc1 {
+		t.Fatal("wrong circuit returned")
+	}
+	if sid != "sid-1" {
+		t.Fatalf("wrong sid: %s", sid)
+	}
+	if ch == nil {
+		t.Fatal("nil channel")
+	}
+
+	d.mu.Lock()
+	_, exists := d.sessions["sid-1"]
+	d.mu.Unlock()
+	if !exists {
+		t.Fatal("session not registered after AcceptOne")
+	}
+
+	d.Unregister("sid-1")
+	d.mu.Lock()
+	_, exists = d.sessions["sid-1"]
+	d.mu.Unlock()
+	if exists {
+		t.Fatal("session still registered after Unregister")
+	}
+}
+
+

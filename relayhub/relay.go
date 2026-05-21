@@ -1,6 +1,7 @@
 package relayhub
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"errors"
@@ -45,8 +46,9 @@ func (id PeerID) Clone() PeerID {
 }
 
 type RelayedConn struct {
-	conn net.Conn
-	once sync.Once
+	conn    net.Conn
+	once    sync.Once
+	SrcPeer PeerID
 }
 
 func newRelayedConn(c net.Conn) *RelayedConn {
@@ -611,6 +613,19 @@ func (c *RelayClient) AcceptRelay(ctx context.Context) (*RelayedConn, error) {
 	}
 }
 
+func (c *RelayClient) AcceptRelayFromPeer(ctx context.Context, src PeerID) (*RelayedConn, error) {
+	for {
+		conn, err := c.AcceptRelay(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if bytes.Equal(conn.SrcPeer, src) {
+			return conn, nil
+		}
+		conn.Close()
+	}
+}
+
 func (c *RelayClient) handleIncoming(stream *yamux.Stream) (*RelayedConn, error) {
 	proto, err := MSRespond(stream)
 	if err != nil {
@@ -709,7 +724,11 @@ func (c *RelayClient) acceptV1Hop(stream *yamux.Stream) (*RelayedConn, error) {
 		if err := writePbMessage(stream, encodeCircuitV1(resp)); err != nil {
 			return nil, fmt.Errorf("send v1 status: %w", err)
 		}
-		return newRelayedConn(stream), nil
+		rc := newRelayedConn(stream)
+		if msg.SrcPeer != nil {
+			rc.SrcPeer = append(PeerID(nil), msg.SrcPeer.ID...)
+		}
+		return rc, nil
 
 	case CircuitV1TypeCanHop:
 		log.Printf("acceptV1Hop: got CAN_HOP probe, responding SUCCESS")
@@ -747,7 +766,11 @@ func (c *RelayClient) acceptV2Stop(stream *yamux.Stream) (*RelayedConn, error) {
 		return nil, fmt.Errorf("send v2 status: %w", err)
 	}
 
-	return newRelayedConn(stream), nil
+	rc := newRelayedConn(stream)
+	if msg.Peer != nil {
+		rc.SrcPeer = append(PeerID(nil), msg.Peer.ID...)
+	}
+	return rc, nil
 }
 
 func readOnePb(r io.Reader) ([]byte, error) {
