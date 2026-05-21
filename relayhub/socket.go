@@ -52,21 +52,38 @@ type RelaySocket struct {
 	rotCount   atomic.Int64
 }
 
-func newRelaySocket(client *RelayClient) *RelaySocket {
-	id := generateConnID()
+func newRelaySocketWithID(id string, client *RelayClient) *RelaySocket {
+	ctx, cancel := context.WithCancel(context.Background())
 	sock := &RelaySocket{
 		id:     id,
 		ch:     make(chan *RelayedConn, 8),
 		client: client,
+		ctx:    ctx,
+		cancel: cancel,
 	}
 
-	client.mu.Lock()
-	limit := client.limit
-	client.mu.Unlock()
-
-	if limit != nil {
-		sock.limitBytes = int64(limit.Data)
+	if client != nil {
+		client.mu.Lock()
+		limit := client.limit
+		client.mu.Unlock()
+		if limit != nil {
+			sock.limitBytes = int64(limit.Data)
+		}
 	}
+
+	return sock
+}
+
+func (c *RelayClient) NewSocket() *RelaySocket {
+	id := generateConnID()
+	sock := newRelaySocketWithID(id, c)
+
+	c.connSocketsMu.Lock()
+	if c.connSockets == nil {
+		c.connSockets = make(map[string]*RelaySocket)
+	}
+	c.connSockets[sock.id] = sock
+	c.connSocketsMu.Unlock()
 
 	return sock
 }
@@ -74,7 +91,24 @@ func newRelaySocket(client *RelayClient) *RelaySocket {
 func (s *RelaySocket) ID() string { return s.id }
 
 func (s *RelaySocket) Listen() {
-	log.Printf("RelaySocket %s: listening", s.id)
+	if s.client == nil {
+		return
+	}
+	s.client.listenerMu.Lock()
+	if s.client.listener == nil {
+		s.client.listener = s
+		log.Printf("RelaySocket %s: registered as listener", s.id)
+	}
+	s.client.listenerMu.Unlock()
+}
+
+func (s *RelaySocket) Accept(ctx context.Context) (*RelaySocket, error) {
+	select {
+	case acc := <-s.client.acceptChan:
+		return acc, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (s *RelaySocket) Connect(ctx context.Context, dst PeerID) (*RelayedConn, error) {
@@ -96,20 +130,6 @@ func (s *RelaySocket) Connect(ctx context.Context, dst PeerID) (*RelayedConn, er
 	s.writeOnCur = int64(len(s.id) + 1)
 
 	return rc, nil
-}
-
-func (s *RelaySocket) Accept(ctx context.Context) (*RelayedConn, error) {
-	s.connOnce.Do(func() {
-		s.ctx, s.cancel = context.WithCancel(ctx)
-	})
-
-	select {
-	case conn := <-s.ch:
-		s.cur = conn
-		return conn, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
 }
 
 func (s *RelaySocket) Write(p []byte) (int, error) {
@@ -195,21 +215,13 @@ func (s *RelaySocket) acceptNext() error {
 	if s.client == nil {
 		return fmt.Errorf("RelaySocket: no relay client")
 	}
-	for {
-		timeoutCtx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
-		defer cancel()
 
-		select {
-		case conn := <-s.ch:
-			cancel()
-			s.cur = conn
-			return nil
-		case <-timeoutCtx.Done():
-			if s.ctx.Err() != nil {
-				return io.EOF
-			}
-			continue
-		}
+	select {
+	case conn := <-s.ch:
+		s.cur = conn
+		return nil
+	case <-s.ctx.Done():
+		return io.EOF
 	}
 }
 
@@ -238,9 +250,9 @@ func (s *RelaySocket) Close() error {
 		}
 
 		if s.client != nil {
-			s.client.socketMu.Lock()
-			delete(s.client.sockets, s.id)
-			s.client.socketMu.Unlock()
+			s.client.connSocketsMu.Lock()
+			delete(s.client.connSockets, s.id)
+			s.client.connSocketsMu.Unlock()
 		}
 
 		if s.cur != nil {

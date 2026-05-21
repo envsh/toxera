@@ -89,14 +89,21 @@ type RelayClient struct {
 	limit              *Limit
 	watchdogCancel     context.CancelFunc
 
-	sockets         map[string]*RelaySocket
-	socketMu        sync.RWMutex
-	dispatchCancel  context.CancelFunc
+	acceptChan     chan *RelaySocket
+	connSockets    map[string]*RelaySocket
+	connSocketsMu  sync.RWMutex
+	listener       *RelaySocket
+	listenerMu     sync.Mutex
+	dispatchCancel context.CancelFunc
 	dispatchRunning atomic.Bool
 }
 
 func NewRelayClient(id PeerID, key ed25519.PrivateKey) *RelayClient {
-	return &RelayClient{id: id.Clone(), key: key}
+	return &RelayClient{
+		id:         id.Clone(),
+		key:        key,
+		acceptChan: make(chan *RelaySocket, 8),
+	}
 }
 
 func (c *RelayClient) PeerID() PeerID {
@@ -228,7 +235,7 @@ func (c *RelayClient) startWatchdog(ctx context.Context) {
 	c.mu.Unlock()
 
 	go func() {
-		t := time.NewTicker(30 * time.Second)
+		t := time.NewTicker(15 * time.Second)
 		defer t.Stop()
 		for {
 			select {
@@ -247,12 +254,14 @@ func (c *RelayClient) startWatchdog(ctx context.Context) {
 				log.Printf("watchdog: Open failed: %v", err)
 				continue
 			}
-			err = MSSelectOver(stream, "/ipfs/id/1.0.0")
+			err = MSSelectOver(stream, "/ipfs/ping/1.0.0")
 			if err != nil {
 				log.Printf("watchdog: MSSelect failed: %v", err)
 				stream.Close()
 				continue
 			}
+			writePbMessage(stream, []byte("ping"))
+			readOnePb(stream)
 			stream.Close()
 		}
 	}()
@@ -271,6 +280,16 @@ func (c *RelayClient) Close() error {
 		c.watchdogCancel = nil
 		log.Printf("RelayClient.Close: watchdog stopped")
 	}
+
+	c.connSocketsMu.Lock()
+	for id, sock := range c.connSockets {
+		sock.Close()
+		delete(c.connSockets, id)
+	}
+	c.connSocketsMu.Unlock()
+
+	c.listener = nil
+
 	if c.session != nil {
 		log.Printf("RelayClient.Close: closing yamux session")
 		err := c.session.Close()
@@ -329,22 +348,6 @@ func (c *RelayClient) Start(ctx context.Context) {
 	go c.dispatchLoop(ctx)
 }
 
-func (c *RelayClient) NewSocket() *RelaySocket {
-	c.socketMu.Lock()
-	if c.sockets == nil {
-		c.sockets = make(map[string]*RelaySocket)
-	}
-	c.socketMu.Unlock()
-
-	sock := newRelaySocket(c)
-
-	c.socketMu.Lock()
-	c.sockets[sock.id] = sock
-	c.socketMu.Unlock()
-
-	return sock
-}
-
 func (c *RelayClient) stopDispatch() {
 	if c.dispatchRunning.CompareAndSwap(true, false) {
 		if c.dispatchCancel != nil {
@@ -394,15 +397,31 @@ func (c *RelayClient) dispatchLoop(ctx context.Context) {
 		sockID := strings.TrimRight(string(data), "\n\r\t ")
 		log.Printf("dispatchLoop: socket ID=%s", sockID)
 
-		c.socketMu.RLock()
-		sock, ok := c.sockets[sockID]
-		c.socketMu.RUnlock()
+		c.connSocketsMu.RLock()
+		sock, ok := c.connSockets[sockID]
+		c.connSocketsMu.RUnlock()
 
 		if ok {
 			sock.dispatchIncoming(conn)
 		} else {
-			log.Printf("dispatchLoop: no socket found for ID=%s", sockID)
-			conn.Close()
+			sock = newRelaySocketWithID(sockID, c)
+			c.connSocketsMu.Lock()
+			if c.connSockets == nil {
+				c.connSockets = make(map[string]*RelaySocket)
+			}
+			c.connSockets[sockID] = sock
+			c.connSocketsMu.Unlock()
+
+			select {
+			case c.acceptChan <- sock:
+			case <-ctx.Done():
+				log.Printf("dispatchLoop: context done while sending to acceptChan")
+				conn.Close()
+				sock.Close()
+				c.dispatchRunning.Store(false)
+				return
+			}
+			sock.dispatchIncoming(conn)
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"log"
 	"sync/atomic"
+	"time"
 
 	"github.com/envsh/toxera/fedkey"
 	"github.com/envsh/toxera/relayhub"
@@ -43,28 +44,44 @@ func main() {
 		log.Fatal("reserve:", err)
 	}
 
+	go func() {
+		t := time.NewTicker(2 * time.Minute)
+		defer t.Stop()
+		for range t.C {
+			log.Println("refreshing reservation...")
+			if err := c.RefreshReservation(ctx); err != nil {
+				log.Printf("refresh reservation: %v", err)
+			}
+		}
+	}()
+
 	c.Start(ctx)
 
-	log.Println("waiting for budgeted connection...")
-	sock := c.NewSocket()
-	sock.Listen()
-	defer sock.Close()
+	srv := c.NewSocket()
+	srv.Listen()
+	log.Println("waiting for connection...")
+
+	acc, err := srv.Accept(ctx)
+	if err != nil {
+		log.Fatal("accept:", err)
+	}
+	log.Printf("accepted socket %s", acc.ID())
 
 	var recv atomic.Int64
 	h := md5.New()
 	buf := make([]byte, 64<<10)
 	for {
-		n, err := sock.Read(buf)
+		n, err := acc.Read(buf)
 		if err != nil {
-			log.Printf("read error: %v (sock=%s recv=%d rotations=%d)", err, sock.ID(), recv.Load(), sock.Rotations())
+			log.Printf("read error: %v (sock=%s recv=%d rotations=%d)", err, acc.ID(), recv.Load(), acc.Rotations())
 			break
 		}
 		h.Write(buf[:n])
 		total := recv.Add(int64(n))
 		if total%(512<<10) == 0 {
 			log.Printf("recv %d bytes (sock=%s rotations=%d remaining=%d)",
-				total, sock.ID(), sock.Rotations(), sock.Remaining())
+				total, acc.ID(), acc.Rotations(), acc.Remaining())
 		}
 	}
-	log.Printf("done, total recv=%d md5=%x (sock=%s rotations=%d)", recv.Load(), h.Sum(nil), sock.ID(), sock.Rotations())
+	log.Printf("done, total recv=%d md5=%x (sock=%s rotations=%d)", recv.Load(), h.Sum(nil), acc.ID(), acc.Rotations())
 }

@@ -18,13 +18,14 @@
 - `cmd/scanrelay` 简化：313 行 → 162 行，复用 `DetectRelay`，删除重复 protobuf/varint/yamux 代码
 - 保活增强：mux.go yamux KeepAliveInterval 30s→10s；relay.go/tls.go TCP SetKeepAlive+SetKeepAlivePeriod(15s)；session CloseChan 监听日志
 - cmd/peer/main.go：Reserve 改为同步调用，每 5min 定时 RefreshReservation()，可配 -relay 参数
-- 15 个单元测试全部通过，go build/vet 无问题
+- 16 个单元测试全部通过，go build/vet 无问题
 - **Round 1 (P0)**: `readOnePb` 加 4096 上限；所有 relay 协议 stream（Reserve/RefreshReservation/connectV2Hop/connectV1Hop）统一设 `SetDeadline(60s)`
 - **Round 2 (P0)**: Identify 响应补全 field 8 signed peer record（Envelope + PeerRecord protobuf, ed25519 签名）；`circuitpb.go` 新增 `encodeAddressInfo`/`encodePeerRecord`/`encodeEnvelope`；`detect.go` `parseIdentify` 加 `case 8` 捕获
 - **Round 3 (P3)**: `MaProtos` 表 10 条根据官方 multicodec 表更正；新增 `webrtc`/`tls`/`noise`；`certhash` value 以 hex 显示
 - **Round 4 (P3)**: `handleIncoming` 注册 `/libp2p/autonat/1.0.0`、`/libp2p/autonat/2/dial-back`、`/libp2p/autonat/2/dial-request`、`/libp2p/dcutr` 4 个新协议处理（均 `rejectStream`: 读 pb → 日志 → 关流）；修复已有 `/ipfs/kad/1.0.0` 的流泄漏
 - **Round 5 (P3)**: `handlePing` 从 `io.ReadFull(buf,32)` 固定大小改为 `readOnePb` + `writePbMessage` 回显，正确支持变长 protobuf ping
 - **Round 6 (P1)**: `RelaySocket` 虚拟 socket 抽象 + 全局 `dispatchLoop`，替代 BudgetedConn pull 模型；自动 rotate stream 突破 relay 单连接流量限制；删除 `budget.go`，新增 `socket.go`
+- **Round 7 (P0)**: 修复路由：dispatchLoop 按接收到的 connector ID 动态创建 acceptor socket，`Listen`/`Accept` 语义对齐真正 socket API；基于新架构的接收端 demo 正常工作
 
 ## Implementation Architecture
 
@@ -40,29 +41,62 @@ TCP 连接
   └── /ipfs/id/1.0.0 协议处理
 ```
 
-### RelaySocket 架构 — 无限流传输的中继 socket
+### RelaySocket 架构 — 完整 socket API
 
-RelaySocket 是对 libp2p circuit relay 的虚拟 socket 抽象，支持**无限流传输**：
+RelaySocket 是对 libp2p circuit relay 的虚拟 socket 抽象，API 对齐真实 socket：
+
+```go
+// === 接收端 ===
+srv := client.NewSocket()
+srv.Listen()
+acc, _ := srv.Accept(ctx)         // 阻塞，返回 acceptor socket
+acc.Read(buf)                     // 内部 auto-rotate 透明
+
+// === 发送端 ===
+cli := client.NewSocket()
+cli.Connect(ctx, dstPeer)
+cli.Write(data)                   // 内部 auto-rotate 透明
+```
+
+#### 路由机制
+
+```
+Connector: cli.Connect(dst) → HOP stream → 首条消息写 cli.id = "sock.A"
+
+Relay → STOP → dispatchLoop → 读首条消息得 "sock.A"
+  → 查 connSockets["sock.A"]?
+
+    不存在（首次）:
+      newRelaySocketWithID("sock.A") → 注册到 connSockets["sock.A"]
+      → 发到 acceptChan → srv.Accept() 返回 acceptor socket
+      → 将 RelayedConn 推入 acceptor socket.ch
+      → acceptor.Read() 从中读取数据
+
+    已存在（rotate）:
+      直接推 RelayedConn 到 connSockets["sock.A"].ch
+      → acceptor.Read() EOF 后 acceptNext 从 ch 取新连接继续读
+```
 
 ```
 RelayClient.Start() → dispatchLoop (后台常驻)
                            │
 yamux stream ←─────────────┤
   → handleIncoming()       │
-    → identify/ping/etc    │ 内联处理，继续循环
-    → STOP 协议            │ 握手后读首条消息 = socket ID
+    → STOP 协议            │ 握手后读首条消息 = connectorID
                            │
-            socket ID ─────┼──→ sockets[sockID].ch ──→ RelaySocket.Accept()
-                           │                              ↕ Read/Write
-                           │                         RelaySocket.Connect() ──→ HOP
-                           │                              ↕ rotateWrite (超限额时自动切换 stream)
+     connectorID ──────────┤
+         ├── connSockets[ID] 存在? → 推入 socket.ch (rotate)
+         └── connSockets[ID] 不存在? → 创建 acceptor socket
+                ├── 注册到 connSockets[ID]
+                ├── 发到 acceptChan → srv.Accept() 返回
+                └── 推入 socket.ch → acc.Read() 读取
 ```
 
 核心特性：
 
 - **socket 内部自动 stream 接力**：由于 libp2p relay 对单条 relayed connection 有 `Limit.Data` 流量限制（通常 128KB），`RelaySocket.Write()` 在写满限额后自动 `rotateWrite()` → 新建一条 HOP stream（携带相同 socket ID）→ 继续写入，对上层调用者完全透明。
-- **全局 dispatch loop**：`RelayClient.Start()` 启动一个后台 goroutine 统一接受 yamux stream，`handleIncoming` 处理完非 relay 协议（identify/ping/autonat/dcutr 等），对 relay STOP 协议完成握手后读取首条 protobuf 消息（即 socket ID），然后根据 ID 查 `sockets` registry 分发到对应的 `RelaySocket.ch`。
-- **socket 生命周期**：`NewSocket()` → `Listen()`（标记接收）或 `Connect(dst)`（发起出站）→ `Accept()` / `Read()` / `Write()` → `Close()`（自动从 registry 注销）。
+- **全局 dispatch loop**：`RelayClient.Start()` 启动一个后台 goroutine 统一接受 yamux stream，`handleIncoming` 处理非 relay 协议，对 STOP 协议完成握手后读 connector ID，动态路由。
+- **socket 生命周期**：`NewSocket()` → `Listen()`（仅首次有效）→ `Accept()` 返回 acceptor socket；或 `Connect(dst)` → `Read()`/`Write()` → `Close()` 自动从 `connSockets` 注销。
 
 ## File Structure
 
@@ -79,7 +113,7 @@ yamux stream ←─────────────┤
 | `circuitv1.go` | circuit v1 protobuf 手工编解码 (CircuitRelay) |
 | `varint.go` | varint 编解码 |
 | `base58.go` | base58 编解码 (PeerID ↔ string) |
-| `relayhub_test.go` | 单元测试 (15 tests) |
+| `relayhub_test.go` | 单元测试 (16 tests) |
 | `cmd/peer/main.go` | 演示 peer 入口，连接 relay + reserve + 保活 |
 | `cmd/budgeted-peer/main.go` | 接收端演示：RelaySocket + Listen + Read 无限流接收 |
 | `cmd/budgeted-connect/main.go` | 发送端演示：RelaySocket + Connect + Write 无限流发送 |
@@ -156,7 +190,7 @@ yamux stream ←─────────────┤
 ## Testing
 
 ```bash
-go test ./... -v -count=1    # 12 tests, all pass
+go test ./... -v -count=1    # 16 tests, all pass
 go vet ./...
 go build ./...
 ```

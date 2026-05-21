@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"flag"
 	"log"
+	"time"
 
 	"github.com/envsh/toxera/fedkey"
 	"github.com/envsh/toxera/relayhub"
@@ -53,6 +54,17 @@ func main() {
 	if err := c.Reserve(ctx); err != nil {
 		log.Fatal("reserve:", err)
 	}
+
+	go func() {
+		t := time.NewTicker(2 * time.Minute)
+		defer t.Stop()
+		for range t.C {
+			log.Println("refreshing reservation...")
+			if err := c.RefreshReservation(ctx); err != nil {
+				log.Printf("refresh reservation: %v", err)
+			}
+		}
+	}()
 
 	c.Start(ctx)
 
