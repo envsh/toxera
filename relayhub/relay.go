@@ -94,15 +94,19 @@ type RelayClient struct {
 	connSocketsMu  sync.RWMutex
 	listener       *RelaySocket
 	listenerMu     sync.Mutex
-	dispatchCancel context.CancelFunc
+	dispatchCancel  context.CancelFunc
 	dispatchRunning atomic.Bool
+
+	sessionDone   chan struct{}
+	sessionDoneMu sync.Once
 }
 
 func NewRelayClient(id PeerID, key ed25519.PrivateKey) *RelayClient {
 	return &RelayClient{
-		id:         id.Clone(),
-		key:        key,
-		acceptChan: make(chan *RelaySocket, 8),
+		id:          id.Clone(),
+		key:         key,
+		acceptChan:  make(chan *RelaySocket, 8),
+		sessionDone: make(chan struct{}),
 	}
 }
 
@@ -197,7 +201,7 @@ func (c *RelayClient) setupSession(secure net.Conn) error {
 
 	go func() {
 		<-session.CloseChan()
-		log.Printf("yamux session closed")
+		log.Printf("[%s] yamux session closed", c.id)
 	}()
 
 	go c.pullIdentify(session)
@@ -216,7 +220,7 @@ func (c *RelayClient) setupSession(secure net.Conn) error {
 		data, _ := readOnePb(stream)
 		resp, _ := decodeCircuitV1(data)
 		if resp != nil {
-			log.Printf("setupSession: relay CAN_HOP response code=%d (%s)", resp.Code, circuitV1StatusString(resp.Code))
+			log.Printf("[%s] setupSession: relay CAN_HOP response code=%d (%s)", c.id, resp.Code, circuitV1StatusString(resp.Code))
 		}
 		stream.Close()
 	}()
@@ -247,16 +251,17 @@ func (c *RelayClient) startWatchdog(ctx context.Context) {
 			s := c.session
 			c.mu.Unlock()
 			if s == nil || s.IsClosed() {
+				c.notifySessionDone()
 				return
 			}
 			stream, err := s.Open()
 			if err != nil {
-				log.Printf("watchdog: Open failed: %v", err)
+				log.Printf("[%s] watchdog: Open failed: %v", c.id, err)
 				continue
 			}
 			err = MSSelectOver(stream, "/ipfs/ping/1.0.0")
 			if err != nil {
-				log.Printf("watchdog: MSSelect failed: %v", err)
+				log.Printf("[%s] watchdog: MSSelect failed: %v", c.id, err)
 				stream.Close()
 				continue
 			}
@@ -268,21 +273,23 @@ func (c *RelayClient) startWatchdog(ctx context.Context) {
 }
 
 func (c *RelayClient) Close() error {
-	log.Printf("RelayClient.Close: enter")
+	log.Printf("[%s] Close: enter", c.id)
 
 	c.stopDispatch()
+	c.notifySessionDone()
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.watchdogCancel != nil {
-		log.Printf("RelayClient.Close: stopping watchdog")
 		c.watchdogCancel()
 		c.watchdogCancel = nil
-		log.Printf("RelayClient.Close: watchdog stopped")
+		log.Printf("[%s] Close: watchdog stopped", c.id)
 	}
 
 	c.connSocketsMu.Lock()
 	for id, sock := range c.connSockets {
+		log.Printf("[%s] Close: connSocket %s: readTotal=%d writeTotal=%d rotations=%d",
+			c.id, id, sock.ReadTotal(), sock.WriteTotal(), sock.Rotations())
 		sock.Close()
 		delete(c.connSockets, id)
 	}
@@ -291,13 +298,13 @@ func (c *RelayClient) Close() error {
 	c.listener = nil
 
 	if c.session != nil {
-		log.Printf("RelayClient.Close: closing yamux session")
+		log.Printf("[%s] Close: closing yamux session", c.id)
 		err := c.session.Close()
 		c.session = nil
-		log.Printf("RelayClient.Close: yamux session closed, err=%v", err)
+		log.Printf("[%s] Close: yamux session closed, err=%v", c.id, err)
 		return err
 	}
-	log.Printf("RelayClient.Close: exit (no session)")
+	log.Printf("[%s] Close: exit (no session)", c.id)
 	return nil
 }
 
@@ -338,6 +345,16 @@ func (c *RelayClient) Connected() bool {
 	return c.session != nil && !c.session.IsClosed()
 }
 
+func (c *RelayClient) SessionDone() <-chan struct{} {
+	return c.sessionDone
+}
+
+func (c *RelayClient) notifySessionDone() {
+	c.sessionDoneMu.Do(func() {
+		close(c.sessionDone)
+	})
+}
+
 func (c *RelayClient) Start(ctx context.Context) {
 	if c.dispatchRunning.Load() {
 		return
@@ -361,17 +378,18 @@ func (c *RelayClient) dispatchLoop(ctx context.Context) {
 	s := c.session
 	c.mu.Unlock()
 	if s == nil {
-		log.Printf("dispatchLoop: no session")
+		log.Printf("[%s] dispatchLoop: no session", c.id)
 		c.dispatchRunning.Store(false)
 		return
 	}
 
-	log.Printf("dispatchLoop: started")
+	log.Printf("[%s] dispatchLoop started", c.id)
 	for {
 		stream, err := acceptStreamWithCtx(s, ctx)
 		if err != nil {
 			if err != context.Canceled {
-				log.Printf("dispatchLoop: accept stream: %v", err)
+				log.Printf("[%s] dispatchLoop: accept stream: %v", c.id, err)
+				c.notifySessionDone()
 			}
 			c.dispatchRunning.Store(false)
 			return
@@ -379,7 +397,7 @@ func (c *RelayClient) dispatchLoop(ctx context.Context) {
 
 		conn, err := c.handleIncoming(stream)
 		if err != nil {
-			log.Printf("dispatchLoop: handleIncoming error: %v", err)
+			log.Printf("[%s] dispatchLoop: handleIncoming error: %v", c.id, err)
 			stream.Close()
 			continue
 		}
@@ -389,13 +407,25 @@ func (c *RelayClient) dispatchLoop(ctx context.Context) {
 
 		data, err := readOnePb(conn)
 		if err != nil {
-			log.Printf("dispatchLoop: read socket ID: %v", err)
+			log.Printf("[%s] dispatchLoop: read socket ID: %v", c.id, err)
 			conn.Close()
 			continue
 		}
 
 		sockID := strings.TrimRight(string(data), "\n\r\t ")
-		log.Printf("dispatchLoop: socket ID=%s", sockID)
+		log.Printf("[%s] dispatchLoop: socket ID=%s", c.id, sockID)
+
+		if strings.HasPrefix(sockID, "close.") {
+			origID := "sock0." + sockID[6:]
+			c.connSocketsMu.RLock()
+			sock, ok := c.connSockets[origID]
+			c.connSocketsMu.RUnlock()
+			if ok {
+				sock.signalClose()
+			}
+			conn.Close()
+			continue
+		}
 
 		c.connSocketsMu.RLock()
 		sock, ok := c.connSockets[sockID]
@@ -415,7 +445,7 @@ func (c *RelayClient) dispatchLoop(ctx context.Context) {
 			select {
 			case c.acceptChan <- sock:
 			case <-ctx.Done():
-				log.Printf("dispatchLoop: context done while sending to acceptChan")
+				log.Printf("[%s] dispatchLoop: context done while sending to acceptChan", c.id)
 				conn.Close()
 				sock.Close()
 				c.dispatchRunning.Store(false)
@@ -449,9 +479,9 @@ func (c *RelayClient) ConnectThroughRelay(ctx context.Context, dstPeerID PeerID)
 }
 
 func (c *RelayClient) connectV2Hop(s *yamux.Session, dstPeerID PeerID) (*RelayedConn, error) {
-	log.Printf("connectV2Hop: opening yamux stream")
+	log.Printf("[%s] connectV2Hop: opening yamux stream", c.id)
 	stream, err := s.Open()
-	log.Printf("connectV2Hop: yamux stream opened, err=%v", err)
+	log.Printf("[%s] connectV2Hop: yamux stream opened, err=%v", c.id, err)
 	if err != nil {
 		return nil, fmt.Errorf("open yamux stream: %w", err)
 	}
@@ -498,9 +528,9 @@ func (c *RelayClient) connectV2Hop(s *yamux.Session, dstPeerID PeerID) (*Relayed
 }
 
 func (c *RelayClient) connectV1Hop(s *yamux.Session, dstPeerID PeerID) (*RelayedConn, error) {
-	log.Printf("connectV1Hop: opening yamux stream")
+	log.Printf("[%s] connectV1Hop: opening yamux stream", c.id)
 	stream, err := s.Open()
-	log.Printf("connectV1Hop: yamux stream opened, err=%v", err)
+	log.Printf("[%s] connectV1Hop: yamux stream opened, err=%v", c.id, err)
 	if err != nil {
 		return nil, fmt.Errorf("open yamux stream: %w", err)
 	}
@@ -644,13 +674,13 @@ func (c *RelayClient) Reserve(ctx context.Context) error {
 		c.reservationAddrs = resp.Reservation.Addrs
 		c.voucher = resp.Reservation.Voucher
 		c.mu.Unlock()
-		log.Printf("Reserve: reservation obtained, expire=%ds, addrs=%d, voucher=%d bytes", resp.Reservation.Expire, len(resp.Reservation.Addrs), len(resp.Reservation.Voucher))
+		log.Printf("[%s] Reserve: reservation obtained, expire=%ds, addrs=%d, voucher=%d bytes", c.id, resp.Reservation.Expire, len(resp.Reservation.Addrs), len(resp.Reservation.Voucher))
 	}
 	if resp.Limit != nil {
 		c.mu.Lock()
 		c.limit = resp.Limit
 		c.mu.Unlock()
-		log.Printf("Reserve: limit duration=%ds data=%d", resp.Limit.Duration, resp.Limit.Data)
+		log.Printf("[%s] Reserve: limit duration=%ds data=%d", c.id, resp.Limit.Duration, resp.Limit.Data)
 	}
 	return nil
 }
@@ -699,7 +729,7 @@ func (c *RelayClient) RefreshReservation(ctx context.Context) error {
 		c.mu.Lock()
 		c.reservationExpiry = time.Unix(int64(resp.Reservation.Expire), 0)
 		c.mu.Unlock()
-		log.Printf("RefreshReservation: renewed, expire=%ds", resp.Reservation.Expire)
+		log.Printf("[%s] RefreshReservation: renewed, expire=%ds", c.id, resp.Reservation.Expire)
 	}
 	return nil
 }

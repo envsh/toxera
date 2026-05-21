@@ -362,11 +362,11 @@ func TestGenerateConnID(t *testing.T) {
 	if s1 == s2 {
 		t.Fatal("conn IDs should differ")
 	}
-	if !strings.HasPrefix(s1, "sock.") || !strings.HasPrefix(s2, "sock.") {
-		t.Fatalf("conn ID missing sock. prefix: %q %q", s1, s2)
+	if !strings.HasPrefix(s1, "sock0.") || !strings.HasPrefix(s2, "sock0.") {
+		t.Fatalf("conn ID missing sock0. prefix: %q %q", s1, s2)
 	}
-	if len(s1) != 30 {
-		t.Fatalf("conn ID length %d, want 30 (format sock.20060102.150405.000000000)", len(s1))
+	if len(s1) != 31 {
+		t.Fatalf("conn ID length %d, want 31 (format sock0.20060102.150405.000000000)", len(s1))
 	}
 }
 

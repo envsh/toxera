@@ -20,7 +20,7 @@ func generateConnID() string {
 	defer idMu.Unlock()
 
 	ts := time.Now().Format("20060102.150405.000000000")
-	cid := "sock." + ts
+	cid := "sock0." + ts
 	for cid == lastID {
 		time.Sleep(time.Nanosecond)
 		ts = time.Now().Format("20060102.150405.000000000")
@@ -47,19 +47,21 @@ type RelaySocket struct {
 	closeOnce sync.Once
 	connOnce  sync.Once
 
-	readTotal  atomic.Int64
-	writeTotal atomic.Int64
-	rotCount   atomic.Int64
+	readTotal   atomic.Int64
+	writeTotal  atomic.Int64
+	rotCount    atomic.Int64
+	closeSignal chan struct{}
 }
 
 func newRelaySocketWithID(id string, client *RelayClient) *RelaySocket {
 	ctx, cancel := context.WithCancel(context.Background())
 	sock := &RelaySocket{
-		id:     id,
-		ch:     make(chan *RelayedConn, 8),
-		client: client,
-		ctx:    ctx,
-		cancel: cancel,
+		id:          id,
+		ch:          make(chan *RelayedConn, 8),
+		client:      client,
+		ctx:         ctx,
+		cancel:      cancel,
+		closeSignal: make(chan struct{}, 1),
 	}
 
 	if client != nil {
@@ -97,7 +99,7 @@ func (s *RelaySocket) Listen() {
 	s.client.listenerMu.Lock()
 	if s.client.listener == nil {
 		s.client.listener = s
-		log.Printf("RelaySocket %s: registered as listener", s.id)
+		log.Printf("[%s] Listen: registered as listener", s.id)
 	}
 	s.client.listenerMu.Unlock()
 }
@@ -163,6 +165,7 @@ func (s *RelaySocket) Write(p []byte) (int, error) {
 
 func (s *RelaySocket) rotateWrite() error {
 	if s.cur != nil {
+		log.Printf("[%s] rotate: closing connection, rot=%d writeTotal=%d", s.id, s.rotCount.Load()+1, s.writeTotal.Load())
 		s.cur.Close()
 		s.rotCount.Add(1)
 	}
@@ -180,6 +183,7 @@ func (s *RelaySocket) rotateWrite() error {
 	}
 	s.cur = rc
 	s.writeOnCur = int64(len(s.id) + 1)
+	log.Printf("[%s] rotate: new connection ready, rot=%d", s.id, s.rotCount.Load())
 	return nil
 }
 
@@ -199,6 +203,7 @@ func (s *RelaySocket) Read(p []byte) (int, error) {
 		s.readTotal.Add(int64(n))
 
 		if err == io.EOF {
+			log.Printf("[%s] Read: EOF, rot=%d readTotal=%d", s.id, s.rotCount.Load()+1, s.readTotal.Load())
 			s.cur.Close()
 			s.cur = nil
 			s.rotCount.Add(1)
@@ -218,8 +223,12 @@ func (s *RelaySocket) acceptNext() error {
 
 	select {
 	case conn := <-s.ch:
+		log.Printf("[%s] acceptNext: new relayed connection, rot=%d", s.id, s.rotCount.Load())
 		s.cur = conn
 		return nil
+	case <-s.closeSignal:
+		log.Printf("[%s] acceptNext: received close signal", s.id)
+		return io.EOF
 	case <-s.ctx.Done():
 		return io.EOF
 	}
@@ -240,9 +249,12 @@ func (s *RelaySocket) Close() error {
 	s.closeOnce.Do(func() {
 		s.closed.Store(true)
 
-		if len(s.dstPeer) > 0 && s.client != nil && s.cur != nil {
-			closeID := "close." + s.id[5:]
-			writePbMessage(s.cur, []byte(closeID))
+		if len(s.dstPeer) > 0 && s.client != nil {
+			closeID := "close." + s.id[6:]
+			if rc, err := s.client.ConnectThroughRelay(s.ctx, s.dstPeer); err == nil {
+				writePbMessage(rc, []byte(closeID))
+				rc.Close()
+			}
 		}
 
 		if s.cancel != nil {
@@ -263,11 +275,18 @@ func (s *RelaySocket) Close() error {
 	return nil
 }
 
+func (s *RelaySocket) signalClose() {
+	select {
+	case s.closeSignal <- struct{}{}:
+	default:
+	}
+}
+
 func (s *RelaySocket) dispatchIncoming(conn *RelayedConn) {
 	select {
 	case s.ch <- conn:
 	default:
-		log.Printf("RelaySocket %s: channel full, dropping incoming connection", s.id)
+		log.Printf("[%s] dispatchIncoming: channel full, dropping incoming connection", s.id)
 		conn.Close()
 	}
 }

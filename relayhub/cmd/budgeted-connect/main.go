@@ -56,13 +56,16 @@ func main() {
 	}
 
 	go func() {
-		t := time.NewTicker(2 * time.Minute)
+		c.RefreshReservation(ctx)
+		t := time.NewTicker(1 * time.Minute)
 		defer t.Stop()
-		for range t.C {
-			log.Println("refreshing reservation...")
-			if err := c.RefreshReservation(ctx); err != nil {
-				log.Printf("refresh reservation: %v", err)
+		for {
+			select {
+			case <-c.SessionDone():
+				return
+			case <-t.C:
 			}
+			c.RefreshReservation(ctx)
 		}
 	}()
 

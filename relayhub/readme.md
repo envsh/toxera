@@ -15,7 +15,7 @@ relay的limit.data值一般128K，总流量太少了。
 
 relay的限制太多，总预约数，每ip预约数等，限制都不太够用，很难用！
 
-2026/05/21 12:57:53 [ERR] yamux: keepalive failed: i/o deadline reached
+relay数据流的太难稳定传输了，基本放弃了。
 
 ### cmds:
 
