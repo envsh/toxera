@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -31,6 +32,18 @@ func InstallRestHandler(path string, mux *http.ServeMux) {
 	myinstall("store_peers", onStorePeers)
 	myinstall("stable_peers", onStablePeers)
 	myinstall("topics", onTopics)
+	myinstall("findpeers", onFindPeers)
+}
+
+func onFindPeers(w http.ResponseWriter, r *http.Request) {
+	tag := r.URL.Query().Get("tag")
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	result, err := FindPeers(tag, limit)
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	writeJSON(w, result)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

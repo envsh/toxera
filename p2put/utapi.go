@@ -11,6 +11,7 @@ import (
 	"time"
 
 	dht "github.com/libp2p/go-libp2p-kad-dht"
+	discovery2 "github.com/libp2p/go-libp2p/core/discovery"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
@@ -239,6 +240,44 @@ type NoopValidator struct {}
 func (NoopValidator) Validate(key string, value []byte) error { return nil }
 func (NoopValidator) Select(key string, values [][]byte) (int, error) {
 	return len(values)-1, nil
+}
+
+type FoundPeer struct {
+	PeerID string   `json:"peer_id"`
+	Addrs  []string `json:"addrs"`
+}
+
+func FindPeers(tag string, limit int) ([]FoundPeer, error) {
+	if tag == "" {
+		tag = currConfig.HubName
+	}
+	if limit <= 0 {
+		limit = 5
+	}
+	if bootres == nil || bootres.Discovery == nil {
+		return nil, fmt.Errorf("discovery not ready")
+	}
+	findCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	peerChan, err := bootres.Discovery.FindPeers(findCtx, tag, discovery2.Limit(limit))
+	if err != nil {
+		return nil, err
+	}
+	var out []FoundPeer
+	for p := range peerChan {
+		if p.ID == bootres.PeerID || p.ID == "" {
+			continue
+		}
+		addrs := make([]string, len(p.Addrs))
+		for i, a := range p.Addrs {
+			addrs[i] = a.String()
+		}
+		out = append(out, FoundPeer{PeerID: p.ID.String(), Addrs: addrs})
+	}
+	if out == nil {
+		out = []FoundPeer{}
+	}
+	return out, nil
 }
 
 func PutKV(ctx context.Context, key string, value []byte) error {
