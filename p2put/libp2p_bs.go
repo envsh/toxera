@@ -27,6 +27,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/protocol"
+	discovery2 "github.com/libp2p/go-libp2p/core/discovery"
 	"github.com/libp2p/go-libp2p/p2p/discovery/routing"
 	"github.com/libp2p/go-libp2p/p2p/host/autorelay"
 	"github.com/libp2p/go-libp2p/core/metrics"
@@ -229,7 +230,8 @@ func mainLibp2p(cfg Config) {
 		}
 	}()
 
-	go myDiscoveryV2()
+	go myDiscoveryV3()
+	//go myDiscoveryV2()
 
 	select {}
 }
@@ -301,8 +303,8 @@ func Libp2pBootstrap(ctx context.Context, cfg Config) (*Libp2pBootResult, error)
 
 		libp2p.EnableAutoRelayWithStaticRelays(
 			dht.GetDefaultBootstrapPeerAddrInfos(),
-			autorelay.WithNumRelays(5),
-			autorelay.WithMinCandidates(5),
+			autorelay.WithNumRelays(3),
+			autorelay.WithMinCandidates(3),
 			autorelay.WithBootDelay(30*time.Second),
 		),
 
@@ -372,11 +374,13 @@ func Libp2pBootstrap(ctx context.Context, cfg Config) (*Libp2pBootResult, error)
 	fmt.Println("=== Phase 3: DHT Bootstrap ===")
 	fmt.Println("[*] Starting Kademlia DHT in client mode...")
 
-	bootCtx, cancel := context.WithTimeout(ctx, 123*time.Second)
+	bootCtx, cancel := context.WithTimeout(ctx, 32*time.Second)
 	defer cancel()
 	kadDHT, err := dht.New(bootCtx, h,
 		dht.Mode(dht.ModeClient),
 		dht.BootstrapPeers(bootstrapInfos...),
+		dht.DisableAutoRefresh(),             // ← 加这一行
+		dht.Concurrency(3),                   // ← 并发从 10 降到 3
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create DHT: %w", err)
@@ -421,7 +425,7 @@ func Libp2pBootstrap(ctx context.Context, cfg Config) (*Libp2pBootResult, error)
 					log.Printf("[score] %s: %.2f", pid.ShortString(), s)
 				}
 			},
-			10*time.Second,
+			30*time.Second,
 		),
 	)
 	if err != nil { log.Println(err) }
@@ -441,7 +445,19 @@ func Libp2pBootstrap(ctx context.Context, cfg Config) (*Libp2pBootResult, error)
 	}, nil
 }
 
-func myDiscoveryV2() {
+func myDiscoveryV3() {
+	rd := bootres.Discovery
+	testCID := "libp2p-bootstrap-test"
+	tag := currConfig.ClusterName
+	tag = testCID
+	for {
+		time.Sleep(3*time.Second)
+	    findAndConnect(tag, rd)
+	    time.Sleep(50*time.Second)
+	}
+}
+
+func myDiscoveryV2ddd() {
 	type tagState struct {
 		nextAt time.Time
 		busy   bool
@@ -467,7 +483,7 @@ func myDiscoveryV2() {
 				return true
 			}
 			s.busy = true
-			s.nextAt = time.Now().Add(20 * time.Second)
+			s.nextAt = time.Now().Add(30 * time.Second)
 			go func(tag string) {
 				findAndConnect(tag, rd)
 				if v, _ := tagStates.Load(tag); v != nil {
@@ -482,7 +498,14 @@ func myDiscoveryV2() {
 func findAndConnect(tag string, rd *routing.RoutingDiscovery) {
 	findCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	peerChan, err := rd.FindPeers(findCtx, tag)
+    // 连接够多了，不查
+    if len(bootres.Host.Network().Conns()) > 9 {
+        // return
+    }
+
+	peerChan, err := rd.FindPeers(findCtx, tag,
+				discovery2.Limit(5),          // ← 只取 10 个结果
+			)
 	if err != nil {
 		return
 	}
@@ -491,6 +514,11 @@ func findAndConnect(tag string, rd *routing.RoutingDiscovery) {
 			continue
 		}
 		if bootres.Host.Network().Connectedness(p.ID) != network.Connected {
+            // 每连一个前再检查一次，防止批量连
+            // if len(bootres.Host.Network().Conns()) > 12 { break }
+
+			// 每两个连接之间间隔 2s
+			time.Sleep(3 * time.Second)
 			dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			t0 := time.Now()
 			if err := bootres.Host.Connect(dialCtx, p); err != nil {

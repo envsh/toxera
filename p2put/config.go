@@ -69,12 +69,12 @@ func myResourceManager() network.ResourceManager {
 	syslmt := limits.SystemBaseLimit
 	const rate = 1
 	limits.SystemBaseLimit = rcmgr.BaseLimit{
-		Conns: (syslmt.Conns/4)*rate,
-		ConnsInbound: (syslmt.ConnsInbound/4)*rate,
-		ConnsOutbound: (syslmt.ConnsOutbound/4)*rate,
-		Streams: (syslmt.Streams/4)*rate,
-		StreamsInbound: (syslmt.StreamsInbound/4)*rate,
-		StreamsOutbound: (syslmt.StreamsOutbound/4)*rate,
+		Conns: (syslmt.Conns/4/2)*rate,
+		ConnsInbound: (syslmt.ConnsInbound/4/2)*rate,
+		ConnsOutbound: (syslmt.ConnsOutbound/4/2)*rate,
+		Streams: (syslmt.Streams/4/2)*rate,
+		StreamsInbound: (syslmt.StreamsInbound/4/2)*rate,
+		StreamsOutbound: (syslmt.StreamsOutbound/4/2)*rate,
 		FD: (syslmt.FD/4)*rate,
 		Memory: (syslmt.Memory/4)*int64(rate),
 	}
@@ -85,14 +85,26 @@ func myResourceManager() network.ResourceManager {
 
 func myGossipSubParams() pubsub.GossipSubParams {
 	dft := pubsub.DefaultGossipSubParams()
-	dft.D =                 3
-	dft.Dlo =                 2
-	dft.Dhi =                 6
-	dft.Dlazy =               3
-	dft.GossipFactor =        0.1
-	dft.HeartbeatInterval =   2 * time.Second
-	dft.HistoryLength =       5
-	dft.HistoryGossip =       3
-	dft.DirectConnectTicks =  600  // ← 必须，否则除以零
+	if true { // lower bw
+		dft.D =                 3
+		dft.Dlo =                 2
+		dft.Dhi =                 4
+		dft.Dlazy =               2
+		dft.GossipFactor =        0.02
+		dft.HeartbeatInterval =   10 * time.Second
+		dft.HistoryLength =       2
+		dft.HistoryGossip =       1
+		dft.DirectConnectTicks =  600  // ← 必须，否则除以零
+	}else{
+		dft.D =                 3
+		dft.Dlo =                 2
+		dft.Dhi =                 6
+		dft.Dlazy =               3
+		dft.GossipFactor =        0.1
+		dft.HeartbeatInterval =   2 * time.Second
+		dft.HistoryLength =       5
+		dft.HistoryGossip =       3
+		dft.DirectConnectTicks =  600  // ← 必须，否则除以零
+	}
 	return dft
 }
