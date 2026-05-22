@@ -304,8 +304,8 @@ func Libp2pBootstrap(ctx context.Context, cfg Config) (*Libp2pBootResult, error)
 
 		libp2p.EnableAutoRelayWithStaticRelays(
 			dht.GetDefaultBootstrapPeerAddrInfos(),
-			autorelay.WithNumRelays(3),
-			autorelay.WithMinCandidates(3),
+			autorelay.WithNumRelays(1),
+			autorelay.WithMinCandidates(2),
 			autorelay.WithBootDelay(30*time.Second),
 		),
 
@@ -381,7 +381,8 @@ func Libp2pBootstrap(ctx context.Context, cfg Config) (*Libp2pBootResult, error)
 		dht.Mode(dht.ModeClient),
 		dht.BootstrapPeers(bootstrapInfos...),
 		dht.DisableAutoRefresh(),             // ← 加这一行
-		dht.Concurrency(3),                   // ← 并发从 10 降到 3
+		dht.Concurrency(1),                   // ← 并发从 10 降到 3
+		dht.RoutingTableRefreshPeriod(15 * time.Minute),  // ← 再加这行, 默认10min
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create DHT: %w", err)
@@ -449,8 +450,9 @@ func Libp2pBootstrap(ctx context.Context, cfg Config) (*Libp2pBootResult, error)
 func myDiscoveryV3() {
 	rd := bootres.Discovery
 	tag := currConfig.HubName
-	for {
+	for i := 0 ;; i++{
 		time.Sleep(3*time.Second)
+		log.Println("start DHT finding...", i)
 	    findAndConnect(tag, rd)
 	    time.Sleep(150*time.Second)
 	}
