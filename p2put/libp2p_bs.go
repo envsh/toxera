@@ -129,7 +129,7 @@ type Libp2pBootResult struct {
 
 // 缓存文件格式: map[string][]string (原始地址 → 解析后的地址列表)
 var dnsaddrsResultFile = "/tmp/libp2p_bootstrap_dnsaddrs.json"
-var dnsaddrsCacheDur = 2*3600*time.Second
+var dnsaddrsCacheDur = 4*3600*time.Second
 
 func loadOrResolveAllDNSAddrs() {
 	if data, err := os.ReadFile(dnsaddrsResultFile); err == nil {
@@ -208,8 +208,9 @@ func mainLibp2p(cfg Config) {
 		cfg.KeyFile = *cfg._KeyFile
 		cfg.ListenPort = *cfg._ListenPort
 	}
+	currConfig = cfg
 
-	res, err := Libp2pBootstrap(context.Background(), cfg)
+	res, err := Libp2pBootstrap(context.Background(), currConfig)
 	if err != nil {
 		panic(err)
 	}
@@ -392,7 +393,7 @@ func Libp2pBootstrap(ctx context.Context, cfg Config) (*Libp2pBootResult, error)
 
 	fmt.Println("[*] Waiting for DHT routing table to populate...")
 	routingDiscovery := routing.NewRoutingDiscovery(kadDHT)
-	testCID := "libp2p-bootstrap-test"
+	testCID := currConfig.HubName // "libp2p-bootstrap-test"
 	discovery.Advertise(ctx, routingDiscovery, testCID) // broadcast self
 
 	if false {
@@ -447,13 +448,11 @@ func Libp2pBootstrap(ctx context.Context, cfg Config) (*Libp2pBootResult, error)
 
 func myDiscoveryV3() {
 	rd := bootres.Discovery
-	testCID := "libp2p-bootstrap-test"
-	tag := currConfig.ClusterName
-	tag = testCID
+	tag := currConfig.HubName
 	for {
 		time.Sleep(3*time.Second)
 	    findAndConnect(tag, rd)
-	    time.Sleep(50*time.Second)
+	    time.Sleep(150*time.Second)
 	}
 }
 

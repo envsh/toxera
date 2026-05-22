@@ -29,7 +29,9 @@ type Config struct {
 	// usage2, assign direct, without Fset.parse
 	KeyFile    string // fedkey seed file
 	ListenPort int
-	ClusterName string // VlanName, our every nodes same name for find
+	HubName string // VlanName, our every nodes same name for find
+	IsMobile  bool // bandwidth and battary
+	UserAgent string // "universal-connectivity/go-peer"
 
 	Server bool
 	Dht   bool
@@ -45,19 +47,21 @@ type Config struct {
 	AutoPing bool
 }
 
-var dftConfig = Config{
-	KeyFile: "key.txt",
-	ClusterName: "libp2p-envsh-test",
-	Dht: true,
-	ResRate: 0.2,
-	Relay: true,
-	NAT: true,
-	Tcp: true,
-	Punching: true,
-}
-var currConfig = dftConfig
+var currConfig = DefaultConfig()
 
 func DefaultConfig() Config {
+	var dftConfig = Config{
+		KeyFile: "key.txt",
+		HubName: "envsh-p2d", // p2p to daemon/distribute
+		UserAgent: "universal-connectivity/envsh-d2hub",
+		Dht: true,
+		ResRate: 0.2,
+		Relay: true,
+		NAT: true,
+		Tcp: true,
+		Punching: true,
+	}
+
 	dftConfig.Fset = getFlagSet(&dftConfig)
 	return dftConfig
 }
@@ -69,12 +73,12 @@ func myResourceManager() network.ResourceManager {
 	syslmt := limits.SystemBaseLimit
 	const rate = 1
 	limits.SystemBaseLimit = rcmgr.BaseLimit{
-		Conns: (syslmt.Conns/4/2)*rate,
-		ConnsInbound: (syslmt.ConnsInbound/4/2)*rate,
-		ConnsOutbound: (syslmt.ConnsOutbound/4/2)*rate,
-		Streams: (syslmt.Streams/4/2)*rate,
-		StreamsInbound: (syslmt.StreamsInbound/4/2)*rate,
-		StreamsOutbound: (syslmt.StreamsOutbound/4/2)*rate,
+		Conns: (syslmt.Conns/4)*rate,
+		ConnsInbound: (syslmt.ConnsInbound/4)*rate,
+		ConnsOutbound: (syslmt.ConnsOutbound/4)*rate,
+		Streams: (syslmt.Streams/4)*rate,
+		StreamsInbound: (syslmt.StreamsInbound/4)*rate,
+		StreamsOutbound: (syslmt.StreamsOutbound/4)*rate,
 		FD: (syslmt.FD/4)*rate,
 		Memory: (syslmt.Memory/4)*int64(rate),
 	}
