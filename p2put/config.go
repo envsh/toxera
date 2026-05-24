@@ -90,7 +90,9 @@ func myResourceManager() network.ResourceManager {
 
 func myGossipSubParams() pubsub.GossipSubParams {
 	dft := pubsub.DefaultGossipSubParams()
-	if true { // lower bw
+	// dft0 := dft
+	which := 2 // 0 default 1 minimal 2 middle
+	if which == 1 { // lower bw
 		dft.D =                 3
 		dft.Dlo =                 2
 		dft.Dhi =                 4
@@ -100,13 +102,23 @@ func myGossipSubParams() pubsub.GossipSubParams {
 		dft.HistoryLength =       3   // 2
 		dft.HistoryGossip =       2   // 1
 		dft.DirectConnectTicks =  600  // ← 必须，否则除以零
-	}else{
+	} else if which == 2 {
 		dft.D =                 3
 		dft.Dlo =                 2
 		dft.Dhi =                 6
 		dft.Dlazy =               3
 		dft.GossipFactor =        0.1
 		dft.HeartbeatInterval =   2 * time.Second
+		dft.HistoryLength =       5
+		dft.HistoryGossip =       3
+		dft.DirectConnectTicks =  600  // ← 必须，否则除以零
+	} else { // default
+		dft.D =                 3
+		dft.Dlo =                 2
+		dft.Dhi =                 6
+		dft.Dlazy =               6
+		dft.GossipFactor =        0.25
+		dft.HeartbeatInterval =   10 * time.Second
 		dft.HistoryLength =       5
 		dft.HistoryGossip =       3
 		dft.DirectConnectTicks =  600  // ← 必须，否则除以零

@@ -6,7 +6,7 @@ require github.com/envsh/toxera/fedkey v0.0.0-20260524011924-6488539daf77
 
 // require github.com/envsh/toxera/fedkey v0.0.0
 
-// replace github.com/envsh/toxera/fedkey => ../fedkey
+replace github.com/envsh/toxera/fedkey => ../fedkey
 
 //	fiatjaf.com/nostr v0.0.0-20260508234157-a4c590d923ee
 require github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect

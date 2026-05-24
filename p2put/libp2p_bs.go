@@ -98,6 +98,7 @@ var peerstorePath = "/tmp/libp2p_peerstore.json"
 var savedPeerstoreSum string
 
 func init() {
+	log.SetFlags((log.Flags() | log.Lshortfile | log.Ltime) &^ log.Ldate)
 	if len(libp2pBootstrap) != len(dht.DefaultBootstrapPeers) {
 		log.Println("Need update bootstrap data")
 	}
@@ -306,8 +307,8 @@ func Libp2pBootstrap(ctx context.Context, cfg Config) (*Libp2pBootResult, error)
 
 		libp2p.EnableAutoRelayWithStaticRelays(
 			dht.GetDefaultBootstrapPeerAddrInfos(),
-			autorelay.WithNumRelays(1),
-			autorelay.WithMinCandidates(2),
+			autorelay.WithNumRelays(2),
+			autorelay.WithMinCandidates(3),
 			autorelay.WithBootDelay(30*time.Second),
 		),
 
@@ -410,6 +411,7 @@ func Libp2pBootstrap(ctx context.Context, cfg Config) (*Libp2pBootResult, error)
 	myEventSuber(h, new(event.EvtLocalReachabilityChanged),
 		new(event.EvtPeerConnectednessChanged))
 	pso, err := pubsub.NewGossipSub(context.Background(), h,
+		pubsub.WithPeerExchange(true),
 		// half default
 		pubsub.WithGossipSubParams(myGossipSubParams()),
 		pubsub.WithPeerScore(
@@ -449,14 +451,47 @@ func Libp2pBootstrap(ctx context.Context, cfg Config) (*Libp2pBootResult, error)
 	}, nil
 }
 
+// only find HubName
 func myDiscoveryV3() {
 	rd := bootres.Discovery
 	tag := currConfig.HubName
+	sec100 := 100*time.Second
+	known := make(map[string]peer.AddrInfo)
 	for i := 0 ;; i++{
 		time.Sleep(3*time.Second)
 		log.Println("start DHT finding...", i)
-	    findAndConnect(tag, rd)
-	    time.Sleep(150*time.Second)
+		result := findAndConnect(tag, rd, 0)
+		for _, p := range result {
+			known[p.ID.String()] = p
+		}
+		log.Println("found peers count:", len(known))
+
+		btime := time.Now()
+		var err error
+		var p2 peer.AddrInfo
+		time.Sleep(3*time.Second)
+		// random select 3 and try connect
+		for j := 0; ; j++ {
+			if time.Since(btime) > sec100 {
+				break
+			}
+			time.Sleep(3*time.Second)
+			for _, p := range known {
+				err = tryConnect(p)
+				p2 = p
+				break
+			}
+		}
+		if err != nil {
+			time.Sleep(5*time.Second)
+			findAndConnect(p2.ID.String(), rd, 1)
+		}
+
+		dur := time.Since(btime)
+		if dur > sec100 {
+			continue
+		}
+	    time.Sleep(sec100-dur)
 	}
 }
 
@@ -488,7 +523,7 @@ func myDiscoveryV2ddd() {
 			s.busy = true
 			s.nextAt = time.Now().Add(30 * time.Second)
 			go func(tag string) {
-				findAndConnect(tag, rd)
+				findAndConnect(tag, rd, 0)
 				if v, _ := tagStates.Load(tag); v != nil {
 					v.(*tagState).busy = false
 				}
@@ -498,7 +533,7 @@ func myDiscoveryV2ddd() {
 	}
 }
 
-func findAndConnect(tag string, rd *routing.RoutingDiscovery) {
+func findAndConnect(tag string, rd *routing.RoutingDiscovery, limit int) []peer.AddrInfo {
 	findCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
     // 连接够多了，不查
@@ -506,16 +541,19 @@ func findAndConnect(tag string, rd *routing.RoutingDiscovery) {
         // return
     }
 
+	if limit <= 0 { limit = 5 }
 	peerChan, err := rd.FindPeers(findCtx, tag,
-				discovery2.Limit(5),          // ← 只取 10 个结果
+				discovery2.Limit(limit),          // ← 只取 10 个结果
 			)
 	if err != nil {
-		return
+		return nil
 	}
+	var found []peer.AddrInfo
 	for p := range peerChan {
 		if p.ID == bootres.Host.ID() || p.ID == "" {
 			continue
 		}
+		found = append(found, p)
 		if bootres.Host.Network().Connectedness(p.ID) != network.Connected {
             // 每连一个前再检查一次，防止批量连
             // if len(bootres.Host.Network().Conns()) > 12 { break }
@@ -534,6 +572,31 @@ func findAndConnect(tag string, rd *routing.RoutingDiscovery) {
 			dialCancel()
 		}
 	}
+	return found
+}
+
+func tryConnect(p peer.AddrInfo) error {
+	if bootres.Host.Network().Connectedness(p.ID) == network.Connected {
+		return nil
+	}
+
+	// 每连一个前再检查一次，防止批量连
+	// if len(bootres.Host.Network().Conns()) > 12 { break }
+
+	// 每两个连接之间间隔 2s
+	time.Sleep(3 * time.Second)
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t0 := time.Now()
+	err := bootres.Host.Connect(dialCtx, p)
+	if err != nil {
+		log.Printf("[discovery] connect %s: %v", p.ID.ShortString(), err)
+	} else {
+		elapsed := time.Since(t0)
+		log.Printf("[discovery] connected to %s in %v", p.ID.ShortString(), elapsed)
+		updatePeerLatency(p.ID, elapsed)
+	}
+	dialCancel()
+	return err
 }
 
 func myDiscoveryV1 (bootCtx context.Context, routingDiscovery *routing.RoutingDiscovery, testCID string, myID peer.ID) (discoveredSet map[peer.ID]struct{}) {
