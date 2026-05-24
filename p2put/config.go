@@ -52,7 +52,7 @@ var currConfig = DefaultConfig()
 func DefaultConfig() Config {
 	var dftConfig = Config{
 		KeyFile: "key.txt",
-		HubName: "envsh-p2d", // p2p to daemon/distribute
+		HubName: "envsh-d2hub", // p2p to daemon/distribute
 		UserAgent: "universal-connectivity/envsh-d2hub",
 		Dht: true,
 		ResRate: 0.2,

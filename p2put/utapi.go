@@ -43,7 +43,8 @@ func init() {
 	clients = make(map[chan Event]struct{})
 	clientTopics = make(map[chan Event][]string)
 	go broadcastLoop()
-	discoveryTags.Store("libp2p-bootstrap-test", struct{}{})
+	// discoveryTags.Store("libp2p-bootstrap-test", struct{}{})
+	discoveryTags.Store("envsh-d2hub", struct{}{})
 }
 
 func AddDiscoveryTag(tag string) {
