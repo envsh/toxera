@@ -107,6 +107,14 @@ func getOrSubscribeTopic(topic string) (*pubsub.Topic, error) {
 	return t, nil
 }
 
+func substr(s string, maxRunes int) string {
+    runes := []rune(s)
+    if len(runes) > maxRunes {
+        runes = runes[:maxRunes]
+    }
+    return string(runes)
+}
+
 func topicListener(sub *pubsub.Subscription, topic string) {
 	ctx := context.Background()
 	for {
@@ -115,7 +123,7 @@ func topicListener(sub *pubsub.Subscription, topic string) {
 			return
 		}
 		isme := msg.ReceivedFrom == bootres.PeerID
-		log.Println("<< submsg", isme, msg.ReceivedFrom.ShortString(), topic, len(msg.Data), string(msg.Data))
+		log.Println("<< submsg", isme, msg.ReceivedFrom.ShortString(), topic, len(msg.Data), substr(string(msg.Data), 48))
 		evt := Event{Type: "pubsub", Topic: topic, Value: msg}
 		clientsMu.RLock()
 		for ch, topics := range clientTopics {
@@ -160,7 +168,7 @@ func PublishTopic(topic string, data []byte) error {
 	}
 	err = t.Publish(context.Background(), data)
 	if err == nil && len(bootres.PSO.ListPeers(topic)) == 0 {
-		return fmt.Errorf("zero pso.ListPeers for %v", topic)
+		return fmt.Errorf("no pso.ListPeers for %v", topic)
 	}
 	return err
 }

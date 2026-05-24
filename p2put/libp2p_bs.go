@@ -576,6 +576,8 @@ func findAndConnect(tag string, rd *routing.RoutingDiscovery, limit int) []peer.
 			continue
 		}
 		found = append(found, p)
+		if true { continue }
+
 		if bootres.Host.Network().Connectedness(p.ID) != network.Connected {
             // 每连一个前再检查一次，防止批量连
             // if len(bootres.Host.Network().Conns()) > 12 { break }
