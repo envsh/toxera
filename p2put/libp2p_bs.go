@@ -74,6 +74,8 @@ const (
 
 	RelayHopProtocol  = protocol.ID("/libp2p/circuit/relay/0.2.0/hop")
 	RelayStopProtocol = protocol.ID("/libp2p/circuit/relay/0.2.0/stop")
+
+	minPeerCount = 16
 )
 
 type Libp2pAddrInfo struct {
@@ -616,7 +618,7 @@ func savePeerstore(path string) error {
 		}
 		m[p.String()] = as
 	}
-	if len(m) == 0 {
+	if len(m) < minPeerCount {
 		return nil
 	}
 	raw, err := json.Marshal(m)
@@ -676,6 +678,9 @@ func cleanPeerstore() {
 	}
 	h := bootres.Host
 	ps := h.Peerstore()
+	if len(ps.Peers()) < minPeerCount {
+		return
+	}
 	for _, pid := range ps.Peers() {
 		if isBootstrapPeer(pid) {
 			continue
