@@ -280,6 +280,56 @@ func FindPeers(tag string, limit int) ([]FoundPeer, error) {
 	return out, nil
 }
 
+func IsPeerInTopic(pid peer.ID, topic string) bool {
+	if bootres == nil || bootres.PSO == nil {
+		return false
+	}
+	for _, p := range bootres.PSO.ListPeers(topic) {
+		if p == pid {
+			return true
+		}
+	}
+	return false
+}
+
+func IsPeerInAnyTopic(pid peer.ID) bool {
+	if bootres == nil || bootres.PSO == nil {
+		return false
+	}
+	for _, topic := range bootres.PSO.GetTopics() {
+		for _, p := range bootres.PSO.ListPeers(topic) {
+			if p == pid {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func IsPeerConnected(pid peer.ID) bool {
+	if bootres == nil || bootres.Host == nil {
+		return false
+	}
+	for _, c := range bootres.Host.Network().Conns() {
+		if c.RemotePeer() == pid {
+			return true
+		}
+	}
+	return false
+}
+
+func IsPeerInStore(pid peer.ID) bool {
+	if bootres == nil || bootres.Host == nil {
+		return false
+	}
+	for _, p := range bootres.Host.Peerstore().Peers() {
+		if p == pid {
+			return true
+		}
+	}
+	return false
+}
+
 func PutKV(ctx context.Context, key string, value []byte) error {
 	if bootres == nil || bootres.Host == nil || bootres.DHT == nil {
 		return fmt.Errorf("libp2p not ready")

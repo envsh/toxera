@@ -477,6 +477,9 @@ func myDiscoveryV3() {
 			}
 			time.Sleep(3*time.Second)
 			for _, p := range known {
+				if IsPeerInAnyTopic(p.ID) || IsPeerConnected(p.ID) {
+					continue
+				}
 				err = tryConnect(p)
 				p2 = p
 				break
