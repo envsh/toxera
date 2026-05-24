@@ -280,25 +280,44 @@ func FindPeers(tag string, limit int) ([]FoundPeer, error) {
 	return out, nil
 }
 
-func IsPeerInTopic(pid peer.ID, topic string) bool {
+func toPeerID(v any) (peer.ID, error) {
+	switch p := v.(type) {
+	case peer.ID:
+		return p, nil
+	case string:
+		return peer.Decode(p)
+	default:
+		return "", fmt.Errorf("expected peer.ID or string, got %T", v)
+	}
+}
+
+func IsPeerInTopic(pid any, topic string) bool {
+	p, err := toPeerID(pid)
+	if err != nil {
+		return false
+	}
 	if bootres == nil || bootres.PSO == nil {
 		return false
 	}
-	for _, p := range bootres.PSO.ListPeers(topic) {
-		if p == pid {
+	for _, q := range bootres.PSO.ListPeers(topic) {
+		if q == p {
 			return true
 		}
 	}
 	return false
 }
 
-func IsPeerInAnyTopic(pid peer.ID) bool {
+func IsPeerInAnyTopic(pid any) bool {
+	p, err := toPeerID(pid)
+	if err != nil {
+		return false
+	}
 	if bootres == nil || bootres.PSO == nil {
 		return false
 	}
 	for _, topic := range bootres.PSO.GetTopics() {
-		for _, p := range bootres.PSO.ListPeers(topic) {
-			if p == pid {
+		for _, q := range bootres.PSO.ListPeers(topic) {
+			if q == p {
 				return true
 			}
 		}
@@ -306,28 +325,57 @@ func IsPeerInAnyTopic(pid peer.ID) bool {
 	return false
 }
 
-func IsPeerConnected(pid peer.ID) bool {
+func IsPeerConnected(pid any) bool {
+	p, err := toPeerID(pid)
+	if err != nil {
+		return false
+	}
 	if bootres == nil || bootres.Host == nil {
 		return false
 	}
 	for _, c := range bootres.Host.Network().Conns() {
-		if c.RemotePeer() == pid {
+		if c.RemotePeer() == p {
 			return true
 		}
 	}
 	return false
 }
 
-func IsPeerInStore(pid peer.ID) bool {
+func IsPeerInStore(pid any) bool {
+	p, err := toPeerID(pid)
+	if err != nil {
+		return false
+	}
 	if bootres == nil || bootres.Host == nil {
 		return false
 	}
-	for _, p := range bootres.Host.Peerstore().Peers() {
-		if p == pid {
+	for _, q := range bootres.Host.Peerstore().Peers() {
+		if q == p {
 			return true
 		}
 	}
 	return false
+}
+
+func FindPeer(pid any) (FoundPeer, error) {
+	p, err := toPeerID(pid)
+	if err != nil {
+		return FoundPeer{}, err
+	}
+	if bootres == nil || bootres.DHT == nil {
+		return FoundPeer{}, fmt.Errorf("dht not ready")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	info, err := bootres.DHT.FindPeer(ctx, p)
+	if err != nil {
+		return FoundPeer{}, err
+	}
+	addrs := make([]string, len(info.Addrs))
+	for i, a := range info.Addrs {
+		addrs[i] = a.String()
+	}
+	return FoundPeer{PeerID: info.ID.String(), Addrs: addrs}, nil
 }
 
 func PutKV(ctx context.Context, key string, value []byte) error {

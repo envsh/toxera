@@ -33,6 +33,7 @@ func InstallRestHandler(path string, mux *http.ServeMux) {
 	myinstall("stable_peers", onStablePeers)
 	myinstall("topics", onTopics)
 	myinstall("findpeers", onFindPeers)
+	myinstall("findpeer", onFindPeer)
 }
 
 func onFindPeers(w http.ResponseWriter, r *http.Request) {
@@ -41,6 +42,20 @@ func onFindPeers(w http.ResponseWriter, r *http.Request) {
 	result, err := FindPeers(tag, limit)
 	if err != nil {
 		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	writeJSON(w, result)
+}
+
+func onFindPeer(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		writeErr(w, http.StatusBadRequest, "missing id")
+		return
+	}
+	result, err := FindPeer(id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
 		return
 	}
 	writeJSON(w, result)
