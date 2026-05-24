@@ -90,7 +90,7 @@ func myResourceManager() network.ResourceManager {
 
 func myGossipSubParams() pubsub.GossipSubParams {
 	dft := pubsub.DefaultGossipSubParams()
-	// dft0 := dft
+	dft0 := dft
 	which := 2 // 0 default 1 minimal 2 middle
 	if which == 1 { // lower bw
 		dft.D =                 3
@@ -122,6 +122,8 @@ func myGossipSubParams() pubsub.GossipSubParams {
 		dft.HistoryLength =       5
 		dft.HistoryGossip =       3
 		dft.DirectConnectTicks =  600  // ← 必须，否则除以零
+
+		dft = dft0
 	}
 	return dft
 }

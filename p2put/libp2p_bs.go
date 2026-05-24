@@ -409,7 +409,8 @@ func Libp2pBootstrap(ctx context.Context, cfg Config) (*Libp2pBootResult, error)
 	fmt.Printf("[*] Node is now online. Press Ctrl+C to exit.\n")
 
 	myEventSuber(h, new(event.EvtLocalReachabilityChanged),
-		new(event.EvtPeerConnectednessChanged))
+		new(event.EvtPeerConnectednessChanged),
+		new(event.EvtLocalAddressesUpdated))
 	pso, err := pubsub.NewGossipSub(context.Background(), h,
 		pubsub.WithPeerExchange(true),
 		// half default
@@ -487,16 +488,25 @@ func myDiscoveryV3() {
 				}
 				err = tryConnect(p)
 				p2 = p
+				if err == nil { break }
+
+				time.Sleep(time.Second)
+				// findAndConnect(p2.ID.String(), rd, 1)
+				addrinfo, err := dht.FindPeer(context.Background(), p2.ID)
+				_ = addrinfo
+				if err != nil {
+				}
 				break
 			}
+			time.Sleep(13*time.Second)
 		}
 		if err != nil {
-			time.Sleep(5*time.Second)
+			// time.Sleep(5*time.Second)
 			// findAndConnect(p2.ID.String(), rd, 1)
-			addrinfo, err := dht.FindPeer(context.Background(), p2.ID)
-			_ = addrinfo
-			if err != nil {
-			}
+			// addrinfo, err := dht.FindPeer(context.Background(), p2.ID)
+			// _ = addrinfo
+			// if err != nil {
+			// }
 		}
 
 		dur := time.Since(btime)
@@ -643,6 +653,11 @@ func myEventSuber(h host.Host, evts ...any) {
 				bootres.NATStatus = e.Reachability
 			case event.EvtPeerConnectednessChanged:
 				handlePeerConnectednessChanged(e)
+			case event.EvtLocalAddressesUpdated:
+				go func(){
+					// bootres.DHT.RefreshRoutingTable()
+					// discovery.Advertise(context.Background(), bootres.Discovery, currConfig.HubName)
+				}()
 			}
 		}
 	}()
