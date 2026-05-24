@@ -464,7 +464,11 @@ func myDiscoveryV3() {
 		for _, p := range result {
 			known[p.ID.String()] = p
 		}
-		log.Println("found peers count:", len(known))
+		log.Println("found peers count:", len(known), i)
+		if i < 3 && len(result) == 0 {
+			time.Sleep(time.Duration(2+i)*time.Second)
+			continue
+		}
 
 		btime := time.Now()
 		var err error
