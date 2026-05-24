@@ -454,6 +454,7 @@ func Libp2pBootstrap(ctx context.Context, cfg Config) (*Libp2pBootResult, error)
 // only find HubName
 func myDiscoveryV3() {
 	rd := bootres.Discovery
+	dht := bootres.DHT
 	tag := currConfig.HubName
 	sec100 := 100*time.Second
 	known := make(map[string]peer.AddrInfo)
@@ -491,7 +492,11 @@ func myDiscoveryV3() {
 		}
 		if err != nil {
 			time.Sleep(5*time.Second)
-			findAndConnect(p2.ID.String(), rd, 1)
+			// findAndConnect(p2.ID.String(), rd, 1)
+			addrinfo, err := dht.FindPeer(context.Background(), p2.ID)
+			_ = addrinfo
+			if err != nil {
+			}
 		}
 
 		dur := time.Since(btime)
