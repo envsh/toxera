@@ -71,7 +71,8 @@ func DefaultConfig() Config {
 func myResourceManager() network.ResourceManager {
 	limits := rcmgr.DefaultLimits
 	syslmt := limits.SystemBaseLimit
-	const rate = 1
+	var rate = 1
+	// if true { rate = 2 }
 	limits.SystemBaseLimit = rcmgr.BaseLimit{
 		Conns: (syslmt.Conns/4)*rate,
 		ConnsInbound: (syslmt.ConnsInbound/4)*rate,
@@ -94,10 +95,10 @@ func myGossipSubParams() pubsub.GossipSubParams {
 		dft.Dlo =                 2
 		dft.Dhi =                 4
 		dft.Dlazy =               2
-		dft.GossipFactor =        0.02
-		dft.HeartbeatInterval =   10 * time.Second
-		dft.HistoryLength =       2
-		dft.HistoryGossip =       1
+		dft.GossipFactor =        0.05 // 0.02
+		dft.HeartbeatInterval =   5 * time.Second // 10
+		dft.HistoryLength =       3   // 2
+		dft.HistoryGossip =       2   // 1
 		dft.DirectConnectTicks =  600  // ← 必须，否则除以零
 	}else{
 		dft.D =                 3

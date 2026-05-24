@@ -2,9 +2,11 @@ module github.com/envsh/toxera/p2put
 
 go 1.21.0
 
-require github.com/envsh/toxera/fedkey v0.0.0
+require github.com/envsh/toxera/fedkey v0.0.0-20260524011924-6488539daf77
 
-replace github.com/envsh/toxera/fedkey => ../fedkey
+// require github.com/envsh/toxera/fedkey v0.0.0
+
+// replace github.com/envsh/toxera/fedkey => ../fedkey
 
 //	fiatjaf.com/nostr v0.0.0-20260508234157-a4c590d923ee
 require github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
