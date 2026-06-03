@@ -2,6 +2,7 @@ package toxpriv
 
 import (
 	"unsafe"
+	"log"
 
 	"github.com/ebitengine/purego"
 )
@@ -47,8 +48,13 @@ func init() {
 	libHandle = 0
 
 	// 先尝试 RTLD_DEFAULT（静态链接场景，tox_iterate 是常用函数）
-	_, err = purego.Dlsym(0, "tox_iterate")
+	_, err = purego.Dlsym(purego.RTLD_DEFAULT, "tox_iterate")
+	hint := "use static symbols"
 	if err != nil {
+		hint = "use dynamic symbols"
+	}
+	if err != nil {
+		log.Println(hint, err, "check -ldflags='-extldflags=-Wl,--export-dynamic'")
 		// 回退到动态加载
 		for _, name := range []string{"libtoxcore.so", "libtoxcore.so.0"} {
 			libHandle, err = purego.Dlopen(name, purego.RTLD_LAZY|purego.RTLD_GLOBAL)
