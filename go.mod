@@ -44,5 +44,6 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/sasha-s/go-deadlock v0.3.9 // indirect
 	github.com/streamrail/concurrent-map v0.0.0-20160823150647-8bf1e9bacbf6 // indirect
+	golang.org/x/crypto v0.33.0
 	golang.org/x/sys v0.30.0 // indirect
 )
