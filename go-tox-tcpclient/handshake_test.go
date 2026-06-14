@@ -303,7 +303,7 @@ func TestGenerateSelfKeysValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pk == nil || sk == nil {
-		t.Fatal("got nil keys")
+	if pk == "" || sk == "" {
+		t.Fatal("got empty keys")
 	}
 }

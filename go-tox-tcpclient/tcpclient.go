@@ -1,10 +1,14 @@
 package tcpclient
 
 import (
+	"bytes"
+	"encoding/hex"
 	"io"
 	"net"
 	"sync"
 	"time"
+
+	"golang.org/x/crypto/curve25519"
 )
 
 type clientStatus int
@@ -53,22 +57,34 @@ type TCPClient struct {
 
 	conns [NumClientConnections]connSlot
 
-	OnRoutingResponse  func(connID uint8, pubkey [PublicKeySize]byte)
+	OnRoutingResponse  func(connID uint8, pubkey string)
 	OnConnectionStatus func(connID uint8, online bool)
-	OnData             func(connID uint8, data []byte)
-	OnOOBData          func(pubkey [PublicKeySize]byte, data []byte)
+	OnData             func(connID uint8, data string)
+	OnOOBData          func(pubkey string, data string)
 	OnDisconnected     func()
 }
 
-func New(addr string, serverPK, selfPK, selfSK []byte) *TCPClient {
+func New(addr string, serverPK, selfSK string) *TCPClient {
 	c := &TCPClient{
 		addr:    addr,
 		writeCh: make(chan []byte, 64),
 		doneCh:  make(chan struct{}),
 	}
-	copy(c.serverPK[:], serverPK[:PublicKeySize])
-	copy(c.selfPK[:], selfPK[:PublicKeySize])
-	copy(c.selfSK[:], selfSK[:SecretKeySize])
+
+	b, err := hex.DecodeString(serverPK)
+	if err != nil {
+		panic("tcpclient.New: serverPK hex: " + err.Error())
+	}
+	copy(c.serverPK[:], b)
+
+	b, err = hex.DecodeString(selfSK)
+	if err != nil {
+		panic("tcpclient.New: selfSK hex: " + err.Error())
+	}
+	copy(c.selfSK[:], b)
+
+	curve25519.ScalarBaseMult(&c.selfPK, &c.selfSK)
+
 	return c
 }
 
@@ -142,16 +158,36 @@ func (c *TCPClient) Close() {
 	c.wg.Wait()
 }
 
-func (c *TCPClient) RoutingRequest(pubkey []byte) error {
-	if len(pubkey) < PublicKeySize {
+func (c *TCPClient) RoutingRequest(pubkey string) error {
+	b, err := hex.DecodeString(pubkey)
+	if err != nil {
 		return ErrInvalidKey
 	}
-	c.sendPlaintext(buildRoutingRequest(pubkey[:PublicKeySize]))
+	c.sendPlaintext(buildRoutingRequest(b[:PublicKeySize]))
 	return nil
 }
 
-func (c *TCPClient) SendData(connID uint8, data []byte) error {
-	pkt, err := buildDataPacket(connID, data)
+func (c *TCPClient) findConnID(pubkey []byte) (uint8, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i := range c.conns {
+		if c.conns[i].status != connFree && bytes.Equal(c.conns[i].pubkey[:], pubkey) {
+			return uint8(i), true
+		}
+	}
+	return 0, false
+}
+
+func (c *TCPClient) SendData(pubkey string, data string) error {
+	b, err := hex.DecodeString(pubkey)
+	if err != nil {
+		return ErrInvalidKey
+	}
+	connID, ok := c.findConnID(b)
+	if !ok {
+		return ErrPeerNotFound
+	}
+	pkt, err := buildDataPacket(connID, []byte(data))
 	if err != nil {
 		return err
 	}
@@ -159,8 +195,12 @@ func (c *TCPClient) SendData(connID uint8, data []byte) error {
 	return nil
 }
 
-func (c *TCPClient) SendOOB(pubkey []byte, data []byte) error {
-	pkt, err := buildOOBSend(pubkey[:PublicKeySize], data)
+func (c *TCPClient) SendOOB(pubkey string, data string) error {
+	b, err := hex.DecodeString(pubkey)
+	if err != nil {
+		return ErrInvalidKey
+	}
+	pkt, err := buildOOBSend(b[:PublicKeySize], []byte(data))
 	if err != nil {
 		return err
 	}
@@ -168,14 +208,19 @@ func (c *TCPClient) SendOOB(pubkey []byte, data []byte) error {
 	return nil
 }
 
-func (c *TCPClient) SendOnionRequest(data []byte) error {
-	c.sendPlaintext(buildOnionRequest(data))
+func (c *TCPClient) SendOnionRequest(data string) error {
+	c.sendPlaintext(buildOnionRequest([]byte(data)))
 	return nil
 }
 
-func (c *TCPClient) DisconnectPeer(connID uint8) error {
-	if connID >= NumClientConnections {
-		return ErrInvalidConnID
+func (c *TCPClient) DisconnectPeer(pubkey string) error {
+	b, err := hex.DecodeString(pubkey)
+	if err != nil {
+		return ErrInvalidKey
+	}
+	connID, ok := c.findConnID(b)
+	if !ok {
+		return ErrPeerNotFound
 	}
 	c.mu.Lock()
 	c.conns[connID].status = connFree
@@ -193,6 +238,7 @@ func (c *TCPClient) IsConnected() bool {
 var (
 	ErrInvalidKey    = &protocolError{"invalid key"}
 	ErrInvalidConnID = &protocolError{"invalid connection ID"}
+	ErrPeerNotFound  = &protocolError{"peer not found"}
 )
 
 type protocolError struct{ msg string }
@@ -346,9 +392,7 @@ func (c *TCPClient) dispatchPacket(plain []byte) {
 				copy(c.conns[actualID].pubkey[:], pk)
 				c.mu.Unlock()
 				if c.OnRoutingResponse != nil {
-					var pkArr [PublicKeySize]byte
-					copy(pkArr[:], pk)
-					c.OnRoutingResponse(actualID, pkArr)
+					c.OnRoutingResponse(actualID, hex.EncodeToString(pk))
 				}
 			}
 		}
@@ -383,9 +427,7 @@ func (c *TCPClient) dispatchPacket(plain []byte) {
 	case PacketOOBRecv:
 		pk, data, ok := parseOOBRecv(plain)
 		if ok && c.OnOOBData != nil {
-			var pkArr [PublicKeySize]byte
-			copy(pkArr[:], pk)
-			c.OnOOBData(pkArr, data)
+			c.OnOOBData(hex.EncodeToString(pk), string(data))
 		}
 	case PacketOnionResponse:
 		_, _ = parseOnionResponse(plain)
@@ -393,7 +435,7 @@ func (c *TCPClient) dispatchPacket(plain []byte) {
 		if isDataPacket(plain) {
 			connID, data, ok := parseDataPacket(plain)
 			if ok && c.OnData != nil {
-				c.OnData(connID, data)
+				c.OnData(connID, string(data))
 			}
 		}
 	}

@@ -2,6 +2,7 @@ package tcpclient
 
 import (
 	"crypto/rand"
+	"encoding/hex"
 	"errors"
 )
 
@@ -99,8 +100,12 @@ func (hs *handshakeState) handleServerResponse(resp []byte) (*[32]byte, *[24]byt
 	return &sessionKeyOut, &recvNonceOut, nil
 }
 
-func generateSelfKeys() (*[32]byte, *[32]byte, error) {
-	return generateKeyPair()
+func generateSelfKeys() (pub, sec string, err error) {
+	pk, sk, err := generateKeyPair()
+	if err != nil {
+		return "", "", err
+	}
+	return hex.EncodeToString(pk[:]), hex.EncodeToString(sk[:]), nil
 }
 
 func randomUint64() uint64 {

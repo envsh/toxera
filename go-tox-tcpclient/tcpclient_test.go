@@ -47,16 +47,12 @@ func tryConnectRelay(t *testing.T, n bsdata.BSNode) *TCPClient {
 			continue
 		}
 		addr := net.JoinHostPort(n.Host, fmt.Sprint(port))
-		serverPK, err := hex.DecodeString(n.Pubkey)
-		if err != nil {
-			continue
-		}
-		selfPK, selfSK, err := generateSelfKeys()
+		_, selfSK, err := generateSelfKeys()
 		if err != nil {
 			continue
 		}
 
-		client := New(addr, serverPK, selfPK[:], selfSK[:])
+		client := New(addr, n.Pubkey, selfSK)
 		disconnected := make(chan struct{}, 1)
 		client.OnDisconnected = func() {
 			select {
@@ -88,15 +84,17 @@ func testRelayClient(t *testing.T, client *TCPClient, name string) {
 	t.Logf("--- testing %s ---", name)
 
 	routingCh := make(chan uint8, 1)
-	client.OnRoutingResponse = func(connID uint8, pk [PublicKeySize]byte) {
+	client.OnRoutingResponse = func(connID uint8, pk string) {
 		routingCh <- connID
 	}
 
-	var pk [PublicKeySize]byte
-	rand.Read(pk[:])
+	pk, _, err := generateSelfKeys()
+	if err != nil {
+		t.Fatalf("[%s] generateSelfKeys failed: %v", name, err)
+	}
 
 	// RoutingRequest
-	if err := client.RoutingRequest(pk[:]); err != nil {
+	if err := client.RoutingRequest(pk); err != nil {
 		t.Fatalf("[%s] RoutingRequest failed: %v", name, err)
 	}
 	select {
@@ -111,8 +109,11 @@ func testRelayClient(t *testing.T, client *TCPClient, name string) {
 	t.Logf("[%s] RoutingRequest OK", name)
 
 	// SendOOB
-	rand.Read(pk[:])
-	if err := client.SendOOB(pk[:], []byte("hello from go-tox-tcpclient")); err != nil {
+	pk, _, err = generateSelfKeys()
+	if err != nil {
+		t.Fatalf("[%s] generateSelfKeys failed: %v", name, err)
+	}
+	if err := client.SendOOB(pk, "hello from go-tox-tcpclient"); err != nil {
 		t.Fatalf("[%s] SendOOB failed: %v", name, err)
 	}
 	time.Sleep(500 * time.Millisecond)
@@ -125,7 +126,7 @@ func testRelayClient(t *testing.T, client *TCPClient, name string) {
 	onionData := make([]byte, PublicKeySize+16)
 	rand.Read(onionData[:PublicKeySize])
 	rand.Read(onionData[PublicKeySize:])
-	if err := client.SendOnionRequest(onionData); err != nil {
+	if err := client.SendOnionRequest(string(onionData)); err != nil {
 		t.Fatalf("[%s] SendOnionRequest failed: %v", name, err)
 	}
 	time.Sleep(500 * time.Millisecond)
@@ -198,11 +199,11 @@ func TestTwoPeerMessageExchange(t *testing.T) {
 
 	type peerState struct {
 		client       *TCPClient
-		pk           [PublicKeySize]byte
-		sk           [SecretKeySize]byte
+		pk           string
+		sk           string
 		routingResp  chan uint8
 		connStatus   chan bool
-		dataCh       chan []byte
+		dataCh       chan string
 		disconnected chan struct{}
 		name         string
 		connected    bool
@@ -218,37 +219,33 @@ func TestTwoPeerMessageExchange(t *testing.T) {
 	}
 
 	a := &peerState{
-		pk:           *pkA,
-		sk:           *skA,
+		pk:           pkA,
+		sk:           skA,
 		routingResp:  make(chan uint8, 1),
 		connStatus:   make(chan bool, 2),
-		dataCh:       make(chan []byte, 4),
+		dataCh:       make(chan string, 4),
 		disconnected: make(chan struct{}, 1),
 		name:         "A",
 	}
 	b := &peerState{
-		pk:           *pkB,
-		sk:           *skB,
+		pk:           pkB,
+		sk:           skB,
 		routingResp:  make(chan uint8, 1),
 		connStatus:   make(chan bool, 2),
-		dataCh:       make(chan []byte, 4),
+		dataCh:       make(chan string, 4),
 		disconnected: make(chan struct{}, 1),
 		name:         "B",
 	}
 
 	setupClient := func(ps *peerState, relayAddr, relayPK string) error {
-		serverPK, err := hex.DecodeString(relayPK)
-		if err != nil {
-			return err
-		}
-		ps.client = New(relayAddr, serverPK, ps.pk[:], ps.sk[:])
-		ps.client.OnRoutingResponse = func(connID uint8, pk [PublicKeySize]byte) {
+		ps.client = New(relayAddr, relayPK, ps.sk)
+		ps.client.OnRoutingResponse = func(connID uint8, pk string) {
 			ps.routingResp <- connID
 		}
 		ps.client.OnConnectionStatus = func(connID uint8, online bool) {
 			ps.connStatus <- online
 		}
-		ps.client.OnData = func(connID uint8, data []byte) {
+		ps.client.OnData = func(connID uint8, data string) {
 			ps.dataCh <- data
 		}
 		ps.client.OnDisconnected = func() {
@@ -309,10 +306,10 @@ func TestTwoPeerMessageExchange(t *testing.T) {
 	defer a.client.Close()
 	defer b.client.Close()
 
-	a.client.RoutingRequest(b.pk[:])
+	a.client.RoutingRequest(b.pk)
 	select {
-	case aConnID := <-a.routingResp:
-		t.Logf("[A] RoutingResponse for B: connID=%d", aConnID)
+	case <-a.routingResp:
+		t.Log("[A] RoutingResponse for B received")
 	case <-time.After(5 * time.Second):
 		t.Fatal("[A] no RoutingResponse")
 	}
@@ -320,10 +317,10 @@ func TestTwoPeerMessageExchange(t *testing.T) {
 		t.Fatal("[A] disconnected after RoutingRequest")
 	}
 
-	b.client.RoutingRequest(a.pk[:])
+	b.client.RoutingRequest(a.pk)
 	select {
-	case bConnID := <-b.routingResp:
-		t.Logf("[B] RoutingResponse for A: connID=%d", bConnID)
+	case <-b.routingResp:
+		t.Log("[B] RoutingResponse for A received")
 	case <-time.After(5 * time.Second):
 		t.Fatal("[B] no RoutingResponse")
 	}
@@ -350,13 +347,13 @@ func TestTwoPeerMessageExchange(t *testing.T) {
 	t.Log("both peers connected via relay")
 
 	msgA := "ping from A"
-	a.client.SendData(0, []byte(msgA))
+	a.client.SendData(b.pk, msgA)
 	select {
 	case recvData := <-b.dataCh:
-		if string(recvData) != msgA {
-			t.Fatalf("[B] received wrong data: got %q, expected %q", string(recvData), msgA)
+		if recvData != msgA {
+			t.Fatalf("[B] received wrong data: got %q, expected %q", recvData, msgA)
 		}
-		t.Logf("[B] correctly received: %q", string(recvData))
+		t.Logf("[B] correctly received: %q", recvData)
 	case <-time.After(5 * time.Second):
 		t.Fatal("[B] timeout waiting for data from A")
 	}
@@ -366,13 +363,13 @@ func TestTwoPeerMessageExchange(t *testing.T) {
 	t.Log("A -> B data verified")
 
 	msgB := "pong from B"
-	b.client.SendData(0, []byte(msgB))
+	b.client.SendData(a.pk, msgB)
 	select {
 	case recvData := <-a.dataCh:
-		if string(recvData) != msgB {
-			t.Fatalf("[A] received wrong data: got %q, expected %q", string(recvData), msgB)
+		if recvData != msgB {
+			t.Fatalf("[A] received wrong data: got %q, expected %q", recvData, msgB)
 		}
-		t.Logf("[A] correctly received: %q", string(recvData))
+		t.Logf("[A] correctly received: %q", recvData)
 	case <-time.After(5 * time.Second):
 		t.Fatal("[A] timeout waiting for data from B")
 	}
@@ -391,7 +388,7 @@ func TestConnectFailure(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	selfPK, selfSK, err := generateSelfKeys()
+	_, selfSK, err := generateSelfKeys()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +398,7 @@ func TestConnectFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	client := New("127.0.0.1:1", serverPK, selfPK[:], selfSK[:])
+	client := New("127.0.0.1:1", hex.EncodeToString(serverPK), selfSK)
 
 	err = client.Connect()
 	if err == nil {
@@ -434,14 +431,19 @@ func TestMultipleBootstrapNodes(t *testing.T) {
 		addr := net.JoinHostPort(n.Host, fmt.Sprint(n.Ports[0]))
 		t.Logf("[%d] connected to %s (%s)", connected+1, addr, n.Pubkey[:16])
 
-		var pk [PublicKeySize]byte
-		rand.Read(pk[:])
-		client.RoutingRequest(pk[:])
-		rand.Read(pk[:])
-		client.SendOOB(pk[:], []byte("multi-test"))
+		pk, _, err := generateSelfKeys()
+		if err != nil {
+			t.Fatalf("generateSelfKeys failed: %v", err)
+		}
+		client.RoutingRequest(pk)
+		pk, _, err = generateSelfKeys()
+		if err != nil {
+			t.Fatalf("generateSelfKeys failed: %v", err)
+		}
+		client.SendOOB(pk, "multi-test")
 		onionData := make([]byte, PublicKeySize+8)
 		rand.Read(onionData)
-		client.SendOnionRequest(onionData)
+		client.SendOnionRequest(string(onionData))
 
 		time.Sleep(500 * time.Millisecond)
 		if client.IsConnected() {

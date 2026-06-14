@@ -3,10 +3,18 @@ package tcpclient
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 
 	"golang.org/x/crypto/nacl/box"
 )
 
+func GenerateKeyPair() (pub, sec string, err error) {
+	pk, sk, err := generateKeyPair()
+	if err != nil {
+		return "", "", err
+	}
+	return hex.EncodeToString(pk[:]), hex.EncodeToString(sk[:]), nil
+}
 func generateKeyPair() (pub, sec *[32]byte, err error) {
 	return box.GenerateKey(rand.Reader)
 }

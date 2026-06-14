@@ -230,9 +230,9 @@ func TestUint64ToBytesRoundTrip(t *testing.T) {
 }
 
 func TestGenerateSelfKeys(t *testing.T) {
-	pk, sk, err := generateSelfKeys()
+	pk, sk, err := generateKeyPair()
 	if err != nil {
-		t.Fatalf("generateSelfKeys failed: %v", err)
+		t.Fatalf("generateKeyPair failed: %v", err)
 	}
 	if pk == nil || sk == nil {
 		t.Fatal("got nil key")
