@@ -1,7 +1,6 @@
 package fedkey
 
 import (
-	"unsafe"
 	"encoding/hex"
 	"strings"
 	"log"
@@ -65,13 +64,4 @@ func SeckeyTopubTox(hexsk string) string {
 
 	pk := hex.EncodeToString(pkb)
 	return strings.ToUpper(pk)
-}
-
-func Dlsym0(name string) unsafe.Pointer {
-	ptr, err := purego.Dlsym(purego.RTLD_DEFAULT, name)
-	if err != nil {
-		log.Println(err)
-		return nil
-	}
-	return unsafe.Pointer(ptr)
 }
