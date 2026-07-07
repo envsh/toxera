@@ -107,6 +107,14 @@ func (kr *KeyRing) BTDHTKey() ed25519.PrivateKey {
 	return ed25519.NewKeyFromSeed(kr.raw())
 }
 
+func (kr *KeyRing) DrasilKey() (secretKey, publicKey []byte) {
+	priv := kr.BTDHTKey()
+	pub := priv.Public().(ed25519.PublicKey)
+	sk := make([]byte, ed25519.PrivateKeySize)
+	copy(sk, priv)
+	return sk, []byte(pub)
+}
+
 func (kr *KeyRing) OpenDHTKey() (*rsa.PrivateKey, error) {
 	block, err := aes.NewCipher(kr.seed[:KeyBytes])
 	if err != nil {
@@ -369,26 +377,6 @@ func base32Encode(data []byte) string {
 	return strings.TrimRight(base32.StdEncoding.EncodeToString(data), "=")
 }
 
-var yggdrasilAlphabet = "ybndrfg8ejkmcpqxot1uwisza345h769"
-
-func base32YggdrasilEncode(data []byte) string {
-	bits := 0
-	buffer := 0
-	var out strings.Builder
-	for _, b := range data {
-		buffer = (buffer << 8) | int(b)
-		bits += 8
-		for bits >= 5 {
-			bits -= 5
-			out.WriteByte(yggdrasilAlphabet[(buffer>>bits)&0x1F])
-		}
-	}
-	if bits > 0 {
-		out.WriteByte(yggdrasilAlphabet[(buffer<<(5-bits))&0x1F])
-	}
-	return out.String()
-}
-
 var base58Alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 func base58Encode(data []byte) string {
@@ -501,20 +489,44 @@ func (kr *KeyRing) CjdnsIPv6() string {
 }
 
 func (kr *KeyRing) YggdrasilIPv6() string {
-	h := sha512.Sum512(kr.ed25519Pub())
-	enc := base32YggdrasilEncode(h[1:16])
-	if len(enc) > 26 {
-		enc = enc[:26]
+	pub := kr.ed25519Pub()
+	var buf [32]byte
+	copy(buf[:], pub)
+	for i := range buf {
+		buf[i] = ^buf[i]
 	}
-	var parts []string
-	for i := 0; i < len(enc); i += 4 {
-		end := i + 4
-		if end > len(enc) {
-			end = len(enc)
+	var temp []byte
+	done := false
+	ones := byte(0)
+	bits := byte(0)
+	nBits := 0
+	for idx := 0; idx < 256; idx++ {
+		bit := (buf[idx/8] & (0x80 >> byte(idx%8))) >> byte(7-(idx%8))
+		if !done && bit != 0 {
+			ones++
+			continue
 		}
-		parts = append(parts, enc[i:end])
+		if !done && bit == 0 {
+			done = true
+			continue
+		}
+		bits = (bits << 1) | bit
+		nBits++
+		if nBits == 8 {
+			temp = append(temp, bits)
+			bits = 0
+			nBits = 0
+		}
 	}
-	return "200:" + strings.Join(parts, ":")
+	var addr [16]byte
+	addr[0] = 0x02
+	addr[1] = ones
+	copy(addr[2:], temp)
+	var parts []string
+	for i := 0; i < 16; i += 2 {
+		parts = append(parts, fmt.Sprintf("%x%02x", addr[i], addr[i+1]))
+	}
+	return strings.Join(parts, ":")
 }
 
 func (kr *KeyRing) NKNNodeID() string {

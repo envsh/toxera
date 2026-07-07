@@ -146,8 +146,74 @@ func TestYggdrasil(t *testing.T) {
 	if ip1 != ip2 {
 		t.Fatal("not deterministic")
 	}
-	if !strings.HasPrefix(ip1, "200:") || len(ip1) < 10 {
+	if !strings.HasPrefix(ip1, "200:") || len(ip1) < 15 {
 		t.Fatalf("bad Yggdrasil IPv6: %s", ip1)
+	}
+}
+
+func TestYggdrasilTestVector(t *testing.T) {
+	pubKey := ed25519.PublicKey{
+		189, 186, 207, 216, 34, 64, 222, 61, 205, 18, 57, 36, 203, 181, 82, 86,
+		251, 141, 171, 8, 170, 152, 227, 5, 82, 138, 184, 79, 65, 158, 110, 251,
+	}
+	var buf [32]byte
+	copy(buf[:], pubKey)
+	for i := range buf {
+		buf[i] = ^buf[i]
+	}
+	var temp []byte
+	done := false
+	ones := byte(0)
+	bits := byte(0)
+	nBits := 0
+	for idx := 0; idx < 256; idx++ {
+		bit := (buf[idx/8] & (0x80 >> byte(idx%8))) >> byte(7-(idx%8))
+		if !done && bit != 0 {
+			ones++
+			continue
+		}
+		if !done && bit == 0 {
+			done = true
+			continue
+		}
+		bits = (bits << 1) | bit
+		nBits++
+		if nBits == 8 {
+			temp = append(temp, bits)
+			bits = 0
+			nBits = 0
+		}
+	}
+	var addr [16]byte
+	addr[0] = 0x02
+	addr[1] = ones
+	copy(addr[2:], temp)
+	var parts []string
+	for i := 0; i < 16; i += 2 {
+		parts = append(parts, fmt.Sprintf("%x%02x", addr[i], addr[i+1]))
+	}
+	result := strings.Join(parts, ":")
+	expected := "200:848a:604f:bb7e:4384:65db:8db6:6895"
+	if result != expected {
+		t.Fatalf("wrong address: got %q, want %q", result, expected)
+	}
+}
+
+func TestDrasilKey(t *testing.T) {
+	kr := fixedSeed()
+	sk, pk := kr.DrasilKey()
+	if len(sk) != ed25519.PrivateKeySize {
+		t.Fatalf("secret key length: got %d, want %d", len(sk), ed25519.PrivateKeySize)
+	}
+	if len(pk) != ed25519.PublicKeySize {
+		t.Fatalf("public key length: got %d, want %d", len(pk), ed25519.PublicKeySize)
+	}
+	if string(pk) != string(sk[ed25519.PublicKeySize:]) {
+		t.Fatal("public key mismatch: pk != sk[32:]")
+	}
+	sk2, pk2 := kr.DrasilKey()
+	if string(sk) != string(sk2) || string(pk) != string(pk2) {
+		t.Fatal("not deterministic")
 	}
 }
 

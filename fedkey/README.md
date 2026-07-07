@@ -10,6 +10,7 @@ A 48-byte seed deterministically generates the key for every supported protocol.
 Seed (48 bytes)
 ├── Nostr          (secp256k1)
 ├── BT-DHT         (Ed25519)
+│   └── DrasilKey  (Ed25519 — yggdrasil-go v0.4+)
 ├── Tox            (X25519)
 ├── I2PD           (Ed25519 + X25519)
 ├── OpenDHT        (RSA-4096)
@@ -40,7 +41,7 @@ Seed (48 bytes)
 | `keyring_ssb_feedid` | Secure Scuttlebutt (SSB) | 无需 | `pub.andrewdo.es:8008`、`ssb.pub:8008`、`hermies.net:8008` |
 | `keyring_hypercore_dk256` / `keyring_hypercore_dk512` | Hypercore (Dat) | 无需 | `bootstrap1.hypercore.dev:49737`、`bootstrap2.hypercore.dev:49737`、内置 Hyperswarm DHT |
 | `keyring_cjdns_ipv6` | Cjdns | **无需**（v22 起自动 DNS 发现） | DNS seed: `seed.cjdns.ca`、`seed.mesh.jfod.org`、`seeder.cjdns.fr` |
-| `keyring_yggdrasil_ipv6` | Yggdrasil | 无需 | `tcp://ygg1.mk16.de:1337`、`tcp://yggdrasil.su:62486`、`tcp://37.186.113.100:1514` |
+| `keyring_yggdrasil_ipv6` / `keyring_drasil_key` | Yggdrasil | 无需 | `tcp://ygg1.mk16.de:1337`、`tcp://yggdrasil.su:62486`、`tcp://37.186.113.100:1514` |
 | `keyring_nkn_nodeid` | NKN | **需注册**（挖矿需链上注册） | `seed.nkn.org:30001`、`seed.nkn.io:30001`、`seed2.nkn.org:30001` |
 | `keyring_gnunet_peerid` | GNUnet | 无需 | `http://v10.gnunet.org/hostlist`（默认 hostlist）、gossip 发现 |
 | `keyring_bitcoin_tor_key` | Bitcoin over Tor | 无需 | `seed.bitcoin.sipa.be`、`dnsseed.bluematt.me`、`seed.bitcoinstats.com` |
@@ -152,4 +153,10 @@ keyring_chia_farmer_key(&kr, sk, pk);
 kr, _ := LoadKeyRing("my.key")
 fmt.Println(kr.String())   // base protocol keys
 fmt.Println(kr.ChiaFarmerKey())
+
+// Yggdrasil v0.4+ keypair
+sk, pk := kr.DrasilKey()
+fmt.Printf("Drasil PrivateKey: %X\n", sk)
+fmt.Printf("Drasil PublicKey:  %X\n", pk)
+fmt.Println("Drasil Address:", kr.YggdrasilIPv6())
 ```
