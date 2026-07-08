@@ -1,8 +1,13 @@
 module github.com/envsh/toxera/relayhub
 
-go 1.21.0
+go 1.24.0
 
-require github.com/envsh/toxera/fedkey v0.0.0
+require (
+	github.com/envsh/toxera/fedkey v0.0.0
+	github.com/flynn/noise v1.1.0
+	github.com/hashicorp/yamux v0.1.2
+	golang.org/x/crypto v0.45.0
+)
 
 replace github.com/envsh/toxera/fedkey => ../fedkey
 
@@ -12,11 +17,9 @@ require (
 	github.com/decred/dcrd/crypto/blake256 v1.0.1 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
-	github.com/flynn/noise v1.1.0 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
 	github.com/gobwas/ws v1.2.0 // indirect
-	github.com/hashicorp/yamux v0.1.2 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/kilic/bls12-381 v0.1.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
@@ -25,7 +28,6 @@ require (
 	github.com/tidwall/gjson v1.14.4 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
-	golang.org/x/crypto v0.33.0 // indirect
 	golang.org/x/exp v0.0.0-20230425010034-47ecfdc1ba53 // indirect
-	golang.org/x/sys v0.30.0 // indirect
+	golang.org/x/sys v0.38.0 // indirect
 )
