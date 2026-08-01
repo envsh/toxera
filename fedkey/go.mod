@@ -1,14 +1,14 @@
 module github.com/envsh/toxera/fedkey
 
-go 1.21.0
+go 1.25.0
 
 require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0
 	github.com/ebitengine/purego v0.10.0
 	github.com/kilic/bls12-381 v0.1.0
 	github.com/nbd-wtf/go-nostr v0.34.0
-	golang.org/x/crypto v0.33.0
-	golang.org/x/sys v0.30.0
+	golang.org/x/crypto v0.52.0
+	golang.org/x/sys v0.45.0
 )
 
 require (
